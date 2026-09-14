@@ -1,0 +1,22 @@
+# Deployment credentials
+.deploy.env
+
+# Xcode
+build/
+DerivedData/
+*.xcodeproj/
+*.xcworkspace
+*.xcuserdatad
+Filaire/Info.plist
+xcuserdata/
+
+# Swift PM
+.build/
+.swiftpm/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# macOS
+.DS_Store
