@@ -1,0 +1,8 @@
+[package]
+name = "fil"
+version = "0.1.0"
+edition = "2021"
+description = "Filaire iOS companion CLI tool for remote server terminal integration"
+license = "Apache-2.0"
+
+[dependencies]
