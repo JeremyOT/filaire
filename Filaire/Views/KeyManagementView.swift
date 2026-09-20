@@ -12,7 +12,7 @@ public struct KeyManagementView: View {
     @State private var showingImportSheet = false
     @State private var copiedKeyId: UUID? = nil
 
-    @State private var newKeyName = "Filaire iPad Key"
+    @State private var newKeyName = KeyManagementView.defaultGeneratedKeyName()
     @State private var keyPassphrase = ""
     @State private var requireBiometrics = true
 
@@ -21,6 +21,7 @@ public struct KeyManagementView: View {
     @State private var importedKeyPassphrase = ""
     @State private var importRequireBiometrics = true
     @State private var errorMessage: String? = nil
+    @State private var keyWarningMessage: String? = nil
 
     public init(keys: Binding<[SSHKeyModel]>, onSelectKey: ((SSHKeyModel) -> Void)? = nil) {
         self._keys = keys
@@ -273,6 +274,11 @@ public struct KeyManagementView: View {
                 }
             }
         }
+        .alert("Key Warning", isPresented: Binding(get: { keyWarningMessage != nil }, set: { if !$0 { keyWarningMessage = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(keyWarningMessage ?? "")
+        }
     }
 
     private func copyPublicKey(_ key: SSHKeyModel) {
@@ -289,17 +295,44 @@ public struct KeyManagementView: View {
         Task {
             var context: LAContext? = nil
             if key.requiresBiometrics {
-                context = try? await BiometricAuthService.authenticate(reason: "Unlock to retrieve public key")
+                do {
+                    context = try await BiometricAuthService.authenticate(reason: "Unlock to retrieve public key")
+                } catch {
+                    return
+                }
             }
-            guard let priv = KeychainService.getPrivateKey(forKeyId: key.id, context: context),
-                  let info = try? SSHKeyGenerator.parseKeyInfo(from: priv),
-                  let idx = keys.firstIndex(where: { $0.id == key.id }) else {
+            guard let priv = KeychainService.getPrivateKey(forKeyId: key.id, context: context) else {
+                await MainActor.run {
+                    keyWarningMessage = "Unable to retrieve key '\(key.name)' from secure storage. The key may need to be regenerated."
+                }
                 return
             }
-            keys[idx].publicKey = info.publicKey
-            keys[idx].keyType = info.keyType
-            copyPublicKey(keys[idx])
+            guard let info = try? SSHKeyGenerator.parseKeyInfo(from: priv) else {
+                await MainActor.run {
+                    keyWarningMessage = "Key '\(key.name)' contains invalid data. The key may need to be regenerated."
+                }
+                return
+            }
+            await MainActor.run {
+                guard let idx = keys.firstIndex(where: { $0.id == key.id }) else {
+                    return
+                }
+                keys[idx].publicKey = info.publicKey
+                keys[idx].keyType = info.keyType
+                copyPublicKey(keys[idx])
+            }
         }
+    }
+
+    /// Prefilled name for a newly generated key, and through it the key's OpenSSH comment.
+    ///
+    /// `UIDevice.name` is the user-assigned device name when the app carries the user-assigned-device-name
+    /// entitlement, and the model ("iPhone", "iPad") otherwise, so the name reflects the actual device
+    /// either way rather than always claiming iPad.
+    static func defaultGeneratedKeyName() -> String {
+        let assigned = UIDevice.current.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let label = assigned.isEmpty ? UIDevice.current.model : assigned
+        return "Filaire \(label) Key"
     }
 
     private func generateKey() {
@@ -328,7 +361,7 @@ public struct KeyManagementView: View {
             keys.append(model)
             onSelectKey?(model)
             showingGenerateSheet = false
-            newKeyName = "Filaire iPad Key"
+            newKeyName = KeyManagementView.defaultGeneratedKeyName()
             keyPassphrase = ""
             requireBiometrics = true
         } catch {

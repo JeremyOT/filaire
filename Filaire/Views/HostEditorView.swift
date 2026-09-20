@@ -18,6 +18,10 @@ public struct HostEditorView: View {
     @State private var copiedFeedback: String? = nil
     @State private var saveErrorMessage: String?
 
+    @State private var installCoordinator = KeyInstallCoordinator()
+    @State private var showingInstallPrompt = false
+    @State private var installPassword: String = ""
+
     public init(
         initialHost: HostProfile = HostProfile(),
         availableKeys: Binding<[SSHKeyModel]>,
@@ -127,6 +131,26 @@ public struct HostEditorView: View {
                                             .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
                                     }
                                     .buttonStyle(.borderless)
+
+                                    Button(action: { beginInstall() }) {
+                                        Label("Install with Password...", systemImage: "key.horizontal")
+                                            .font(.caption.bold())
+                                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
+                                    }
+                                    .buttonStyle(.borderless)
+                                    .disabled(!canInstall)
+
+                                    if case .succeeded(let message) = installCoordinator.phase {
+                                        Text(message)
+                                            .font(.caption2)
+                                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.green))
+                                    }
+                                    if case .failed(let message) = installCoordinator.phase {
+                                        Text(message)
+                                            .font(.caption2)
+                                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.red))
+                                            .textSelection(.enabled)
+                                    }
                                 }
                                 .padding(.vertical, 4)
                             }
@@ -361,7 +385,9 @@ public struct HostEditorView: View {
                 if draftHost.authMethod == .password {
                     password = KeychainService.getPassword(forHostId: draftHost.id) ?? ""
                 }
-                if draftHost.selectedKeyId == nil, let firstKey = availableKeys.first {
+                if let keyId = draftHost.selectedKeyId, !availableKeys.contains(where: { $0.id == keyId }) {
+                    draftHost.selectedKeyId = availableKeys.first?.id
+                } else if draftHost.selectedKeyId == nil, let firstKey = availableKeys.first {
                     draftHost.selectedKeyId = firstKey.id
                 }
             }
@@ -369,6 +395,24 @@ public struct HostEditorView: View {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text(saveErrorMessage ?? "")
+            }
+            .alert("Install Public Key", isPresented: $showingInstallPrompt) {
+                SecureField("Password", text: $installPassword)
+                Button("Install") { runInstall() }
+                Button("Cancel", role: .cancel) { installPassword = "" }
+            } message: {
+                Text("Logs in to \(draftHost.username)@\(draftHost.hostname) with this password and appends the public key to ~/.ssh/authorized_keys. The password is used for this one connection and is not saved.")
+            }
+            .alert("Trust New Host Key?", isPresented: Binding(
+                get: { installCoordinator.pendingHostKey != nil },
+                set: { if !$0 { installCoordinator.resolveHostKey(trusted: false) } }
+            )) {
+                Button("Trust and Install") { installCoordinator.resolveHostKey(trusted: true) }
+                Button("Cancel", role: .cancel) { installCoordinator.resolveHostKey(trusted: false) }
+            } message: {
+                if let entry = installCoordinator.pendingHostKey {
+                    Text("The authenticity of \(entry.hostname):\(entry.port) can’t be verified.\n\n\(entry.keyType) key fingerprint:\n\(entry.fingerprintSHA256)\n\nYour password is only sent after you trust this key.")
+                }
             }
         }
     }
@@ -401,6 +445,35 @@ public struct HostEditorView: View {
         }
         onSave(draftHost)
         dismiss()
+    }
+
+    /// Install needs a reachable host, a user to install for, and a selected key.
+    private var canInstall: Bool {
+        guard !installCoordinator.isBusy else { return false }
+        guard !draftHost.hostname.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !draftHost.username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        guard let keyId = draftHost.selectedKeyId,
+              let key = availableKeys.first(where: { $0.id == keyId }) else { return false }
+        return KeyInstaller.validate(publicKey: key.publicKey) == nil
+    }
+
+    private func beginInstall() {
+        // Pre-fill only when this host already stores a password; key-auth hosts usually have none.
+        installPassword = password.isEmpty
+            ? (KeychainService.getPassword(forHostId: draftHost.id) ?? "")
+            : password
+        installCoordinator.reset()
+        showingInstallPrompt = true
+    }
+
+    private func runInstall() {
+        guard let keyId = draftHost.selectedKeyId,
+              let key = availableKeys.first(where: { $0.id == keyId }) else { return }
+        let secret = installPassword
+        installPassword = ""
+        Task { @MainActor in
+            await installCoordinator.run(publicKey: key.publicKey, host: draftHost, password: secret)
+        }
     }
 
     private func copyToClipboard(_ text: String, feedback: String) {

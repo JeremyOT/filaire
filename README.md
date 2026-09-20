@@ -66,14 +66,40 @@
 | `Cmd + N` / `Cmd + P` (or `Cmd + ]` / `Cmd + [`) | Next / previous tmux window |
 | `Cmd + 1…9`, `Cmd + Opt + 0` | Jump to tmux window |
 | `Cmd + D` / `Cmd + Shift + D` | Split vertically / horizontally (new pane opens in the current pane's directory) |
+| `Cmd + M` | Mark the current tmux pane |
+| `Cmd + J` / `Cmd + Shift + J` | Join the marked pane vertically / horizontally |
+| `Cmd + Shift + B` | Break the pane into its own tmux window |
 | `Cmd + Opt + Arrow` | Move between panes |
 | `Cmd + Shift + R` | Rename tmux window |
 | `Cmd + Opt + C` | tmux copy mode |
+| `Cmd + Shift + E` | Compose a command (Cmd + Return runs it) |
+| `Cmd + Shift + S` | Snippet library |
 | `Cmd + K` | Clear screen |
 | `Cmd + +` / `Cmd + -` / `Cmd + 0` | Increase / decrease / reset font size |
 | `Cmd + ,` | Settings |
 
-tmux shortcuts are active when tmux auto-connect is enabled for the host. To open splits in the current pane's directory, Filaire registers two key bindings on the tmux server when it attaches.
+tmux shortcuts are active when tmux auto-connect is enabled for the host. To open splits in the current pane's directory and join panes, Filaire registers key bindings on the tmux server when it attaches.
+
+---
+
+## Command Snippets
+
+Save command templates, fill in named parameters, review the exact command, and open it in the composer. Nothing is sent until you choose Insert or Run.
+
+| Syntax | Meaning |
+| :--- | :--- |
+| `{{name}}` | One POSIX shell-quoted argument (sh, bash, zsh) |
+| `{{name:raw}}` | Unquoted shell source; shown distinctly in the preview |
+| `{{{{` / `}}}}` | A literal `{{` / `}}` |
+
+```text
+journalctl -u {{service}} -n {{lines}} --no-pager
+git -C {{directory}} switch -- {{branch}}
+```
+
+Outside quotes a placeholder must stand alone as a complete word, so `--namespace {{ns}}` is valid while `--namespace={{ns}}` is not. Inside quotes the surrounding quotes already form one word, so `--dbname='{{db}}_prod'` and `"https://{{host}}/api"` both work: the value is escaped for the quote it sits in rather than quoted again. Placeholders are still rejected inside command substitutions, backticks, and here-documents, where a value would be shell source rather than data. Quoting stops the shell expanding a value; it does not stop a program treating a leading `-` as an option, and it does not expand `~`, variables, or globs.
+
+Secret parameters never store a default and are masked in the preview. Once expanded into a command, a secret is part of that command text and may reach the remote shell history.
 
 ---
 

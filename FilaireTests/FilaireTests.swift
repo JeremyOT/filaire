@@ -8,6 +8,7 @@ import NIOConcurrencyHelpers
 import Citadel
 import SwiftTerm
 import Network
+import GameController
 import os
 @testable import Filaire
 
@@ -23,8 +24,8 @@ final class FilaireTests: XCTestCase {
             username: "dev"
         )
 
-        // Split bindings for Cmd+D / Cmd+Shift+D, chained after new-session
-        let splitBindings = " \\; set -s 'user-keys[900]' \"$(printf '\\033[9990~')\" \\; set -s 'user-keys[901]' \"$(printf '\\033[9991~')\" \\; bind -n User900 split-window -h -c '#{pane_current_path}' \\; bind -n User901 split-window -v -c '#{pane_current_path}'"
+        // Split and join bindings for Cmd+D / Cmd+Shift+D / Cmd+J / Cmd+Shift+J, chained after new-session
+        let splitBindings = " \\; set -s 'user-keys[900]' \"$(printf '\\033[9990~')\" \\; set -s 'user-keys[901]' \"$(printf '\\033[9991~')\" \\; set -s 'user-keys[902]' \"$(printf '\\033[9992~')\" \\; set -s 'user-keys[903]' \"$(printf '\\033[9993~')\" \\; bind -n User900 split-window -h -c '#{pane_current_path}' \\; bind -n User901 split-window -v -c '#{pane_current_path}' \\; bind -n User902 join-pane -h \\; bind -n User903 join-pane -v"
 
         // Rule 4: Username must always be the default tmux session name
         XCTAssertEqual(profile.effectiveTmuxSession, "dev")
@@ -311,6 +312,22 @@ final class FilaireTests: XCTestCase {
         // 8b. Cmd+Shift+R: Rename Window -> [0x02, ',']
         XCTAssertTrue(terminalView.handleKeyShortcut(characters: "R", charactersIgnoringModifiers: "r", modifierFlags: [.command, .shift]))
         XCTAssertEqual(delegate.sentData.last, [0x02, UInt8(ascii: ",")])
+
+        // 8c. Cmd+Shift+B: Break Pane Into Window -> [0x02, '!']
+        XCTAssertTrue(terminalView.handleKeyShortcut(characters: "B", charactersIgnoringModifiers: "b", modifierFlags: [.command, .shift]))
+        XCTAssertEqual(delegate.sentData.last, [0x02, UInt8(ascii: "!")])
+
+        // 8d. Cmd+M: Mark Pane -> [0x02, 'm']
+        XCTAssertTrue(terminalView.handleKeyShortcut(characters: "m", charactersIgnoringModifiers: "m", modifierFlags: .command))
+        XCTAssertEqual(delegate.sentData.last, [0x02, UInt8(ascii: "m")])
+
+        // 8e. Cmd+J: Join Vertically -> ESC [9992~ (bound by tmux startup command)
+        XCTAssertTrue(terminalView.handleKeyShortcut(characters: "j", charactersIgnoringModifiers: "j", modifierFlags: .command))
+        XCTAssertEqual(delegate.sentData.last, Array("\u{1b}[9992~".utf8))
+
+        // 8f. Cmd+Shift+J: Join Horizontally -> ESC [9993~ (bound by tmux startup command)
+        XCTAssertTrue(terminalView.handleKeyShortcut(characters: "J", charactersIgnoringModifiers: "j", modifierFlags: [.command, .shift]))
+        XCTAssertEqual(delegate.sentData.last, Array("\u{1b}[9993~".utf8))
 
         // 9. Cmd+3: Switch to Window 3 -> [0x02, '3']
         XCTAssertTrue(terminalView.handleKeyShortcut(characters: "3", charactersIgnoringModifiers: "3", modifierFlags: .command))
@@ -831,7 +848,7 @@ final class FilaireTests: XCTestCase {
     }
 
     @MainActor
-    func testConnectFailureDuringReconnectSchedulesNextAttempt() async {
+    func testConnectFailureDuringReconnectDoesNotRetry() async {
         let manager = SessionManager()
         manager.activeHost = HostProfile(name: "Retry", hostname: "retry.invalid")
         manager.reconnectAttempt = 2
@@ -839,9 +856,8 @@ final class FilaireTests: XCTestCase {
 
         await manager.handleConnectFailure(error: POSIXError(.ECONNREFUSED))
 
-        XCTAssertEqual(manager.state, .reconnecting(attempt: 3))
-        XCTAssertEqual(manager.reconnectAttempt, 3)
-        manager.cancelReconnect()
+        XCTAssertTrue(manager.state.isFailed)
+        XCTAssertEqual(manager.reconnectAttempt, 0)
     }
 
     @MainActor
@@ -1708,6 +1724,7 @@ final class FilaireTests: XCTestCase {
         var failAddStatus: OSStatus? = nil
         var failUpdateStatus: OSStatus? = nil
         var simulateDuplicateOnRefAdd = false
+        var simulateBiometricsLocked = false
         var addCount = 0
         var updateCount = 0
         var deleteCount = 0
@@ -1725,6 +1742,13 @@ final class FilaireTests: XCTestCase {
             let storageKey = "\(service):\(account)"
             guard let item = items[storageKey] else {
                 return errSecItemNotFound
+            }
+
+            if simulateBiometricsLocked && !account.hasSuffix(".ref") {
+                if (dict[kSecUseAuthenticationUI as String] as? String) == (kSecUseAuthenticationUISkip as String) {
+                    return errSecInteractionNotAllowed
+                }
+                return errSecAuthFailed
             }
 
             if dict[kSecReturnData as String] as? Bool == true {
@@ -1913,6 +1937,209 @@ final class FilaireTests: XCTestCase {
         XCTAssertNil(KeychainService.getPrivateKey(forKeyId: newKeyId))
         mock.failAddStatus = nil
         XCTAssertEqual(KeychainService.getPrivateKey(forKeyId: unrelatedKeyId), "unrelated-key-data")
+    }
+
+    func testKeychainExistenceChecksDistinguishMissingFromBiometricLocked() throws {
+        let mock = MockKeychainBackend()
+        KeychainService.backend = mock
+        defer { KeychainService.resetBackend() }
+
+        let hostId = UUID()
+        let keyId = UUID()
+
+        // 1. Initially missing
+        XCTAssertFalse(KeychainService.hasPassword(forHostId: hostId))
+        XCTAssertFalse(KeychainService.hasPrivateKey(forKeyId: keyId))
+        XCTAssertFalse(KeychainService.hasKeyPassphrase(forKeyId: keyId))
+
+        // 2. Save items
+        try KeychainService.savePassword("mypassword", forHostId: hostId, requireBiometrics: true)
+        try KeychainService.savePrivateKey("myprivatekey", forKeyId: keyId, requireBiometrics: true)
+        try KeychainService.saveKeyPassphrase("mypassphrase", forKeyId: keyId, requireBiometrics: true)
+
+        XCTAssertTrue(KeychainService.hasPassword(forHostId: hostId))
+        XCTAssertTrue(KeychainService.hasPrivateKey(forKeyId: keyId))
+        XCTAssertTrue(KeychainService.hasKeyPassphrase(forKeyId: keyId))
+
+        // 3. Simulate biometric locked (e.g. user hasn't scanned Face ID or cancelled)
+        mock.simulateBiometricsLocked = true
+
+        // Direct get without auth fails/returns nil
+        XCTAssertNil(KeychainService.getPassword(forHostId: hostId))
+        XCTAssertNil(KeychainService.getPrivateKey(forKeyId: keyId))
+        XCTAssertNil(KeychainService.getKeyPassphrase(forKeyId: keyId))
+
+        // But non-prompting existence check STILL returns true because item is physically in Keychain!
+        XCTAssertTrue(KeychainService.hasPassword(forHostId: hostId))
+        XCTAssertTrue(KeychainService.hasPrivateKey(forKeyId: keyId))
+        XCTAssertTrue(KeychainService.hasKeyPassphrase(forKeyId: keyId))
+
+        // 4. Delete items
+        mock.simulateBiometricsLocked = false
+        KeychainService.deletePassword(forHostId: hostId)
+        KeychainService.deletePrivateKey(forKeyId: keyId)
+        KeychainService.deleteKeyPassphrase(forKeyId: keyId)
+
+        XCTAssertFalse(KeychainService.hasPassword(forHostId: hostId))
+        XCTAssertFalse(KeychainService.hasPrivateKey(forKeyId: keyId))
+        XCTAssertFalse(KeychainService.hasKeyPassphrase(forKeyId: keyId))
+    }
+
+    @MainActor
+    func testKeysAreNeverAutomaticallyPurgedOnStartupOrReload() throws {
+        let mock = MockKeychainBackend()
+        KeychainService.backend = mock
+        defer {
+            KeychainService.resetBackend()
+            UserDefaults.standard.removeObject(forKey: AppState.savedHostsKey)
+            UserDefaults.standard.removeObject(forKey: "io.o-t.filaire.saved_keys")
+        }
+
+        let orphanedKeyId = UUID()
+        let orphanedKey = SSHKeyModel(
+            id: orphanedKeyId,
+            name: "Orphaned Key",
+            publicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAtest key@ipad",
+            requiresBiometrics: false
+        )
+
+        let hostId = UUID()
+        let hostWithKey = HostProfile(
+            id: hostId,
+            name: "Key Host",
+            hostname: "key.example.com",
+            username: "deploy",
+            authMethod: .sshKey,
+            selectedKeyId: orphanedKeyId,
+            agentForwardingKeyIds: [orphanedKeyId]
+        )
+
+        // Populate UserDefaults
+        let keysData = try JSONEncoder().encode([orphanedKey])
+        let hostsData = try JSONEncoder().encode([hostWithKey])
+        UserDefaults.standard.set(keysData, forKey: "io.o-t.filaire.saved_keys")
+        UserDefaults.standard.set(hostsData, forKey: AppState.savedHostsKey)
+
+        // Keychain backend is completely empty (e.g. after migration or keychain transient failure)
+        let appState = AppState()
+
+        // Keys MUST NOT be purged
+        XCTAssertEqual(appState.keys.count, 1)
+        XCTAssertEqual(appState.keys.first?.id, orphanedKeyId)
+
+        // Host configuration must NOT be modified
+        let loadedHost = appState.hosts.first(where: { $0.id == hostId })
+        XCTAssertNotNil(loadedHost)
+        XCTAssertEqual(loadedHost?.authMethod, .sshKey)
+        XCTAssertEqual(loadedHost?.selectedKeyId, orphanedKeyId)
+        XCTAssertEqual(loadedHost?.agentForwardingKeyIds, [orphanedKeyId])
+
+        // Reloading keys or hosts must ALSO never purge them
+        appState.reloadKeys()
+        XCTAssertEqual(appState.keys.count, 1)
+
+        appState.reloadHosts()
+        XCTAssertEqual(appState.hosts.count, 1)
+    }
+
+    @MainActor
+    func testBiometricCredentialsPreservedWhenLocked() throws {
+        let mock = MockKeychainBackend()
+        KeychainService.backend = mock
+        defer {
+            KeychainService.resetBackend()
+            UserDefaults.standard.removeObject(forKey: AppState.savedHostsKey)
+            UserDefaults.standard.removeObject(forKey: "io.o-t.filaire.saved_keys")
+        }
+
+        let biometricKeyId = UUID()
+        let biometricKey = SSHKeyModel(
+            id: biometricKeyId,
+            name: "Biometric Key",
+            publicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAtest key@ipad",
+            requiresBiometrics: true
+        )
+
+        let hostId = UUID()
+        let hostProfile = HostProfile(
+            id: hostId,
+            name: "Secured Host",
+            hostname: "secured.example.com",
+            username: "admin",
+            authMethod: .password,
+            selectedKeyId: biometricKeyId,
+            requireBiometrics: true
+        )
+
+        try KeychainService.savePassword("secret-pass", forHostId: hostId, requireBiometrics: true)
+        try KeychainService.savePrivateKey("secret-priv-key", forKeyId: biometricKeyId, requireBiometrics: true)
+
+        let keysData = try JSONEncoder().encode([biometricKey])
+        let hostsData = try JSONEncoder().encode([hostProfile])
+        UserDefaults.standard.set(keysData, forKey: "io.o-t.filaire.saved_keys")
+        UserDefaults.standard.set(hostsData, forKey: AppState.savedHostsKey)
+
+        // Lock biometrics
+        mock.simulateBiometricsLocked = true
+
+        let appState = AppState()
+
+        // Biometric key must NOT be purged
+        XCTAssertEqual(appState.keys.count, 1)
+        XCTAssertEqual(appState.keys.first?.id, biometricKeyId)
+
+        // Password auth must NOT be reset
+        let loadedHost = appState.hosts.first(where: { $0.id == hostId })
+        XCTAssertEqual(loadedHost?.authMethod, .password)
+        XCTAssertEqual(loadedHost?.selectedKeyId, biometricKeyId)
+    }
+
+    func testSSHServiceAuthResolutionDisplaysRegenerationWarningOnMissingOrInvalidKey() async throws {
+        let mock = MockKeychainBackend()
+        KeychainService.backend = mock
+        defer { KeychainService.resetBackend() }
+
+        let sshService = SSHService()
+        let hostId = UUID()
+        let keyId = UUID()
+        let keyModel = SSHKeyModel(id: keyId, name: "Production Key", publicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAtest key@ipad")
+
+        let keyHost = HostProfile(
+            id: hostId,
+            name: "Key Host",
+            hostname: "test.example.com",
+            username: "admin",
+            authMethod: .sshKey,
+            selectedKeyId: keyId
+        )
+
+        // 1. Missing private key in Keychain: throws .keyNotFound and formatErrorMessage warns of regeneration
+        do {
+            _ = try await sshService.resolveAuthMethod(for: keyHost, allKeys: [keyModel])
+            XCTFail("Should fail when key cannot be retrieved")
+        } catch let sshErr as SSHError {
+            guard case .keyNotFound = sshErr else {
+                XCTFail("Expected .keyNotFound error, got \(sshErr)")
+                return
+            }
+            let authInfo = await sshService.lastAttemptedAuth
+            let formatted = SessionManager.formatErrorMessage(sshErr, for: keyHost, authInfo: authInfo)
+            XCTAssertTrue(formatted.contains("The key may need to be regenerated."))
+            XCTAssertTrue(formatted.contains("Production Key"))
+        }
+
+        // 2. Corrupt / invalid private key in Keychain: throws .invalidCredentials with regeneration warning
+        try KeychainService.savePrivateKey("NOT A VALID OPENSSH KEY", forKeyId: keyId, requireBiometrics: false)
+        do {
+            _ = try await sshService.resolveAuthMethod(for: keyHost, allKeys: [keyModel])
+            XCTFail("Should fail when key data is invalid")
+        } catch let sshErr as SSHError {
+            guard case .invalidCredentials(let msg) = sshErr else {
+                XCTFail("Expected .invalidCredentials, got \(sshErr)")
+                return
+            }
+            XCTAssertTrue(msg.contains("The key may need to be regenerated."))
+        }
     }
 
     @MainActor
@@ -2135,21 +2362,112 @@ final class FilaireTests: XCTestCase {
         XCTAssertFalse(TerminalSettings.shared.showKeyboardAccessoryBar)
     }
 
+    func testKeyboardAccessoryBarDefaultsToTrueOnAllPlatforms() {
+        let key = "io.o-t.filaire.show_keyboard_accessory_bar"
+        let saved = UserDefaults.standard.object(forKey: key)
+        defer {
+            if let saved = saved {
+                UserDefaults.standard.set(saved, forKey: key)
+            } else {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
+        }
+        UserDefaults.standard.removeObject(forKey: key)
+        XCTAssertTrue(TerminalSettings.shared.showKeyboardAccessoryBar, "Keyboard helper bar must default to true on all devices including iPad")
+    }
+
+    @MainActor
+    func testFilaireTerminalViewAccessoryBarConfiguredByDefault() {
+        let key = "io.o-t.filaire.show_keyboard_accessory_bar"
+        let saved = UserDefaults.standard.object(forKey: key)
+        defer {
+            if let saved = saved {
+                UserDefaults.standard.set(saved, forKey: key)
+            } else {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
+        }
+        UserDefaults.standard.removeObject(forKey: key)
+
+        let terminalView = FilaireTerminalView(frame: CGRect(x: 0, y: 0, width: 600, height: 400))
+        terminalView.isHardwareKeyboardConnectedOverride = false
+        terminalView.updateAccessoryBarVisibility()
+
+        XCTAssertNotNil(terminalView.customAccessoryView, "customAccessoryView must be present by default")
+        XCTAssertNotNil(terminalView.inputAccessoryView, "inputAccessoryView must be present by default when no hardware keyboard is connected")
+        guard let accessory = terminalView.customAccessoryView else {
+            XCTFail("customAccessoryView should not be nil")
+            return
+        }
+        XCTAssertTrue(accessory.allowsSelfSizing, "FilaireAccessoryView must have allowsSelfSizing enabled for Auto Layout on iPad")
+        XCTAssertEqual(accessory.intrinsicContentSize.height, 44.0)
+    }
+
+    @MainActor
+    func testAccessoryBarHiddenWhenMagicKeyboardPresentWithoutOnScreenKeyboard() {
+        let key = "io.o-t.filaire.show_keyboard_accessory_bar"
+        let saved = UserDefaults.standard.object(forKey: key)
+        defer {
+            if let saved = saved {
+                UserDefaults.standard.set(saved, forKey: key)
+            } else {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
+        }
+        UserDefaults.standard.removeObject(forKey: key)
+
+        let terminalView = FilaireTerminalView(frame: CGRect(x: 0, y: 0, width: 600, height: 400))
+        terminalView.isHardwareKeyboardConnectedOverride = true
+        terminalView.isOnScreenKeyboardDisplayedOverride = false
+        terminalView.updateAccessoryBarVisibility()
+
+        XCTAssertFalse(terminalView.shouldShowAccessoryBar, "Accessory bar should not be shown when Magic Keyboard is present without onscreen keyboard")
+        XCTAssertNil(terminalView.inputAccessoryView, "inputAccessoryView must be nil when using Magic Keyboard without onscreen keyboard")
+        XCTAssertNotNil(terminalView.customAccessoryView, "customAccessoryView should still be instantiated for when needed")
+    }
+
+    @MainActor
+    func testAccessoryBarShownWhenMagicKeyboardPresentWithOnScreenKeyboard() {
+        let key = "io.o-t.filaire.show_keyboard_accessory_bar"
+        let saved = UserDefaults.standard.object(forKey: key)
+        defer {
+            if let saved = saved {
+                UserDefaults.standard.set(saved, forKey: key)
+            } else {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
+        }
+        UserDefaults.standard.removeObject(forKey: key)
+
+        let terminalView = FilaireTerminalView(frame: CGRect(x: 0, y: 0, width: 600, height: 400))
+        terminalView.isHardwareKeyboardConnectedOverride = true
+        terminalView.isOnScreenKeyboardDisplayedOverride = true
+        terminalView.updateAccessoryBarVisibility()
+
+        XCTAssertTrue(terminalView.shouldShowAccessoryBar, "Accessory bar should be shown when onscreen keyboard is displayed even if Magic Keyboard is present")
+        XCTAssertNotNil(terminalView.inputAccessoryView, "inputAccessoryView must be present when onscreen keyboard is displayed")
+        XCTAssertTrue(terminalView.inputAccessoryView === terminalView.customAccessoryView)
+    }
+
     private final class MockAccessoryDelegate: FilaireAccessoryDelegate {
         var sentBytes: [UInt8] = []
         var pasteRequested = false
+        var composerRequested = false
+        var snippetsRequested = false
         func accessoryDidSendBytes(_ bytes: [UInt8]) { sentBytes.append(contentsOf: bytes) }
         func accessoryDidInsertText(_ text: String) {}
         func accessoryDidToggleControl(isActive: Bool) {}
         func accessoryDidToggleAlt(isActive: Bool) {}
         func accessoryDidRequestDismissKeyboard() {}
         func accessoryDidRequestPaste() { pasteRequested = true }
+        func accessoryDidRequestComposer() { composerRequested = true }
+        func accessoryDidRequestSnippets() { snippetsRequested = true }
     }
 
     @MainActor
     func testAccessoryBarTmuxPrefixConfiguration() {
         let delegate = MockAccessoryDelegate()
-        let accessory = FilaireAccessoryView(frame: CGRect(x: 0, y: 0, width: 600, height: 40), delegate: delegate)
+        let accessory = FilaireAccessoryView(frame: CGRect(x: 0, y: 0, width: 600, height: 44), delegate: delegate)
 
         guard let stack = accessory.subviews.compactMap({ $0 as? UIScrollView }).first?.subviews.compactMap({ $0 as? UIStackView }).first else {
             XCTFail("Failed to find UIStackView in accessory view")
@@ -2157,8 +2475,11 @@ final class FilaireTests: XCTestCase {
         }
 
         let buttons = stack.arrangedSubviews.compactMap { $0 as? UIButton }
-        let prefixButton = buttons.first
-        let copyButton = buttons.count > 1 ? buttons[1] : nil
+        XCTAssertEqual(buttons.first?.configuration?.title, "Compose", "Compose must be the 1st button in the keyboard accessory bar")
+        XCTAssertEqual(buttons.count > 1 ? buttons[1].configuration?.title : nil, "Snippets", "Snippets must be the 2nd button in the keyboard accessory bar")
+
+        let prefixButton = buttons.first { $0.configuration?.title == "Ctrl-B" || $0.configuration?.title == "Ctrl-Z" }
+        let copyButton = buttons.first { $0.configuration?.title == "Copy" }
         XCTAssertNotNil(prefixButton)
         XCTAssertNotNil(copyButton)
         XCTAssertFalse(prefixButton?.isHidden ?? true)
@@ -2200,7 +2521,7 @@ final class FilaireTests: XCTestCase {
     @MainActor
     func testAccessoryBarEnhancedButtonsAndStickyModifiers() {
         let delegate = MockAccessoryDelegate()
-        let accessory = FilaireAccessoryView(frame: CGRect(x: 0, y: 0, width: 800, height: 40), delegate: delegate)
+        let accessory = FilaireAccessoryView(frame: CGRect(x: 0, y: 0, width: 800, height: 44), delegate: delegate)
 
         guard let stack = accessory.subviews.compactMap({ $0 as? UIScrollView }).first?.subviews.compactMap({ $0 as? UIStackView }).first else {
             XCTFail("Failed to find UIStackView in accessory view")
@@ -2230,6 +2551,20 @@ final class FilaireTests: XCTestCase {
         paste?.sendActions(for: .touchUpInside)
         XCTAssertTrue(delegate.pasteRequested, "Paste button must request paste from accessory delegate")
 
+        // Find Compose button
+        let compose = buttons.first { $0.configuration?.title == "Compose" }
+        XCTAssertNotNil(compose, "Accessory bar must include Compose button")
+        XCTAssertFalse(delegate.composerRequested)
+        compose?.sendActions(for: .touchUpInside)
+        XCTAssertTrue(delegate.composerRequested, "Compose button must request composer from accessory delegate")
+
+        // Find Snippets button
+        let snippets = buttons.first { $0.configuration?.title == "Snippets" }
+        XCTAssertNotNil(snippets, "Accessory bar must include Snippets button")
+        XCTAssertFalse(delegate.snippetsRequested)
+        snippets?.sendActions(for: .touchUpInside)
+        XCTAssertTrue(delegate.snippetsRequested, "Snippets button must request snippets from accessory delegate")
+
         // Arrow navigation with sticky Alt (Word navigation)
         // Find arrow buttons: Left arrow
         let leftArrow = buttons.first { $0.configuration?.image != nil && ($0.configuration?.title == nil || $0.configuration?.title?.isEmpty == true) }
@@ -2255,6 +2590,56 @@ final class FilaireTests: XCTestCase {
         leftArrow?.sendActions(for: .touchUpInside)
         XCTAssertEqual(delegate.sentBytes, [0x01], "Ctrl + Left arrow must send Ctrl-A (start of line)")
         XCTAssertFalse(accessory.isControlActive, "Sticky Ctrl must reset after arrow navigation")
+    }
+
+    @MainActor
+    func testAccessoryBarButtonDimensions() {
+        let delegate = MockAccessoryDelegate()
+        for width in [390.0, 834.0, 1376.0] {
+            let accessory = FilaireAccessoryView(frame: CGRect(x: 0, y: 0, width: width, height: 44), delegate: delegate)
+            XCTAssertEqual(accessory.intrinsicContentSize.height, 44.0, "Accessory view height should be 44pt on all device sizes")
+            accessory.layoutIfNeeded()
+            guard let scroll = accessory.subviews.compactMap({ $0 as? UIScrollView }).first,
+                  let stack = scroll.subviews.compactMap({ $0 as? UIStackView }).first else {
+                XCTFail("Missing scroll or stack view in accessory bar")
+                return
+            }
+            let buttons = stack.arrangedSubviews.compactMap({ $0 as? UIButton })
+            // All buttons should have at least 44pt touch width and comfortable height (~43.5pt in a 44pt bar)
+            for button in buttons {
+                XCTAssertGreaterThanOrEqual(button.frame.width, 44.0, "Each button should have minimum 44pt width for touch target: \(button.configuration?.title ?? "symbol")")
+                XCTAssertGreaterThanOrEqual(button.frame.height, 40.0, "Each button should fill bar height for touch target: \(button.configuration?.title ?? "symbol")")
+            }
+            // Buttons with longer text must expand to fit their single-line content without wrapping
+            if let composeButton = buttons.first(where: { $0.configuration?.title == "Compose" }) {
+                XCTAssertGreaterThan(composeButton.frame.width, 65.0, "Compose button must size to fit its content on a single line without wrapping")
+                XCTAssertEqual(composeButton.titleLabel?.numberOfLines, 1, "Compose button must be single line")
+            }
+            if let snippetsButton = buttons.first(where: { $0.configuration?.title == "Snippets" }) {
+                XCTAssertGreaterThan(snippetsButton.frame.width, 65.0, "Snippets button must size to fit its content on a single line without wrapping")
+                XCTAssertEqual(snippetsButton.titleLabel?.numberOfLines, 1, "Snippets button must be single line")
+            }
+            if let ctrlBButton = buttons.first(where: { $0.configuration?.title == "Ctrl-B" }) {
+                XCTAssertGreaterThan(ctrlBButton.frame.width, 55.0, "Ctrl-B button must size to fit its content on a single line without wrapping")
+                XCTAssertEqual(ctrlBButton.titleLabel?.numberOfLines, 1, "Ctrl-B button must be single line")
+            }
+            // Arrow buttons: all four arrow buttons (buttons with images and no title) must be identical in size
+            let arrowButtons = buttons.filter { $0.configuration?.image != nil && ($0.configuration?.title == nil || $0.configuration?.title?.isEmpty == true) }
+            XCTAssertEqual(arrowButtons.count, 4, "Should have 4 arrow buttons")
+            if arrowButtons.count == 4 {
+                let left = arrowButtons[0]
+                let up = arrowButtons[1]
+                let down = arrowButtons[2]
+                let right = arrowButtons[3]
+                XCTAssertEqual(left.frame.width, 44.0, accuracy: 1.0, "Left arrow should be 44pt wide")
+                XCTAssertEqual(up.frame.width, 44.0, accuracy: 1.0, "Up arrow should be 44pt wide")
+                XCTAssertEqual(down.frame.width, 44.0, accuracy: 1.0, "Down arrow should be 44pt wide")
+                XCTAssertEqual(right.frame.width, 44.0, accuracy: 1.0, "Right arrow should be 44pt wide")
+                XCTAssertEqual(left.frame.width, up.frame.width, accuracy: 0.5, "Left and up arrows must be same size")
+                XCTAssertEqual(left.frame.width, down.frame.width, accuracy: 0.5, "Left and down arrows must be same size")
+                XCTAssertEqual(left.frame.width, right.frame.width, accuracy: 0.5, "Left and right arrows must be same size")
+            }
+        }
     }
 
     // MARK: - OSC 52 Clipboard & OSC 777 Notification Integration
@@ -4641,7 +5026,11 @@ final class FilaireTests: XCTestCase {
         sm.triggerTmuxRenameWindow()
         sm.triggerTmuxSplitVertical()
         sm.triggerTmuxSplitHorizontal()
+        sm.triggerTmuxJoinVertical()
+        sm.triggerTmuxJoinHorizontal()
+        sm.triggerTmuxMarkPane()
         sm.triggerTmuxZoomPane()
+        sm.triggerTmuxBreakPane()
         sm.triggerTmuxClosePane()
         sm.triggerTmuxNextPane()
         sm.triggerTmuxLastPane()
@@ -4653,6 +5042,21 @@ final class FilaireTests: XCTestCase {
         sm.triggerTmuxRenameWindow()
         sm.triggerTmuxNextPane()
         sm.triggerTmuxLastPane()
+    }
+
+    @MainActor
+    func testGeneratedKeyNameReflectsTheDeviceRatherThanAHardcodedModel() {
+        let name = KeyManagementView.defaultGeneratedKeyName()
+
+        XCTAssertTrue(name.hasPrefix("Filaire "))
+        XCTAssertTrue(name.hasSuffix(" Key"))
+
+        let assigned = UIDevice.current.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let expected = assigned.isEmpty ? UIDevice.current.model : assigned
+        XCTAssertTrue(
+            name.contains(expected),
+            "Expected the key name to carry the device label '\(expected)', got '\(name)'"
+        )
     }
 
     // MARK: - Dynamic Port Forwarding & SOCKS5 Tests
@@ -4736,7 +5140,7 @@ final class FilaireTests: XCTestCase {
         XCTAssertFalse(profile.tmuxStartupCommand.contains("set-clipboard"))
 
         // Enabled: set-clipboard runs before attaching
-        let splitBindings = " \\; set -s 'user-keys[900]' \"$(printf '\\033[9990~')\" \\; set -s 'user-keys[901]' \"$(printf '\\033[9991~')\" \\; bind -n User900 split-window -h -c '#{pane_current_path}' \\; bind -n User901 split-window -v -c '#{pane_current_path}'"
+        let splitBindings = " \\; set -s 'user-keys[900]' \"$(printf '\\033[9990~')\" \\; set -s 'user-keys[901]' \"$(printf '\\033[9991~')\" \\; set -s 'user-keys[902]' \"$(printf '\\033[9992~')\" \\; set -s 'user-keys[903]' \"$(printf '\\033[9993~')\" \\; bind -n User900 split-window -h -c '#{pane_current_path}' \\; bind -n User901 split-window -v -c '#{pane_current_path}' \\; bind -n User902 join-pane -h \\; bind -n User903 join-pane -v"
         profile.enableTmuxSetClipboard = true
         XCTAssertEqual(profile.tmuxStartupCommand, "tmux set -s set-clipboard on 2>/dev/null; exec tmux new-session -A -s dev\(splitBindings)\n")
         profile.detachExistingTmux = true
@@ -8764,12 +9168,18 @@ final class FilaireTests: XCTestCase {
         XCTAssertFalse(view.triggerTmuxPrevWindow())
         XCTAssertFalse(view.triggerTmuxSplitVertical())
         XCTAssertFalse(view.triggerTmuxSplitHorizontal())
+        XCTAssertFalse(view.triggerTmuxJoinVertical())
+        XCTAssertFalse(view.triggerTmuxJoinHorizontal())
+        XCTAssertFalse(view.triggerTmuxMarkPane())
         XCTAssertFalse(view.triggerTmuxWindowNumber(1))
 
         // When enabled, tmux actions succeed
         view.configureTmux(enabled: true, prefixTitle: "Ctrl-A", prefixByte: 0x01)
         XCTAssertTrue(view.autoConnectTmux)
         XCTAssertTrue(view.triggerTmuxNewWindow())
+        XCTAssertTrue(view.triggerTmuxJoinVertical())
+        XCTAssertTrue(view.triggerTmuxJoinHorizontal())
+        XCTAssertTrue(view.triggerTmuxMarkPane())
 
         // When disabled again, tmux actions are suppressed
         view.configureTmux(enabled: false, prefixTitle: "Ctrl-B", prefixByte: 0x02)
@@ -9670,6 +10080,116 @@ final class FilaireTests: XCTestCase {
         XCTAssertEqual(recArchived?.hostId, host.id)
         XCTAssertEqual(recOther?.status, .closing, "Duplicate session must be marked .closing")
         XCTAssertNil(recOther?.hostId, "Duplicate session hostId must be cleared")
+    }
+
+    @MainActor
+    func testDeduplicateWindowsEnforcesAtMostOneActiveWindowPerHost() {
+        let host = HostProfile(name: "SingleHost", hostname: "single.local")
+        let hostId = host.id
+
+        let smActive = SessionManager()
+        let smDuplicate = SessionManager()
+        smActive.state = .connected
+
+        MultiWindowManager.shared.forceMultipleWindowsForTesting = true
+        defer {
+            MultiWindowManager.shared.forceMultipleWindowsForTesting = nil
+            MultiWindowManager.shared.unregister(sessionManager: smActive)
+            MultiWindowManager.shared.unregister(sessionManager: smDuplicate)
+        }
+
+        MultiWindowManager.shared.register(sessionManager: smActive, scene: nil, hostId: hostId, sessionPersistentIdentifier: "session-active")
+        MultiWindowManager.shared.register(sessionManager: smDuplicate, scene: nil, hostId: hostId, sessionPersistentIdentifier: "session-dup")
+
+        MultiWindowManager.shared.deduplicateWindows()
+
+        let entryActive = MultiWindowManager.shared.entry(for: smActive)
+        let entryDup = MultiWindowManager.shared.entry(for: smDuplicate)
+
+        XCTAssertEqual(entryActive?.status, .owned, "Active session must remain .owned")
+        XCTAssertEqual(entryActive?.hostId, hostId)
+        XCTAssertEqual(entryDup?.status, .closing, "Duplicate session must be closed")
+        XCTAssertNil(entryDup?.hostId, "Duplicate session hostId must be cleared")
+    }
+
+    @MainActor
+    func testDeduplicateWindowsPreservesDifferentHosts() {
+        let host1 = HostProfile(name: "Host1", hostname: "host1.local")
+        let host2 = HostProfile(name: "Host2", hostname: "host2.local")
+
+        let sm1 = SessionManager()
+        let sm2 = SessionManager()
+        sm1.state = .connected
+        sm2.state = .connected
+
+        MultiWindowManager.shared.forceMultipleWindowsForTesting = true
+        defer {
+            MultiWindowManager.shared.forceMultipleWindowsForTesting = nil
+            MultiWindowManager.shared.unregister(sessionManager: sm1)
+            MultiWindowManager.shared.unregister(sessionManager: sm2)
+        }
+
+        MultiWindowManager.shared.register(sessionManager: sm1, scene: nil, hostId: host1.id, sessionPersistentIdentifier: "session-host1")
+        MultiWindowManager.shared.register(sessionManager: sm2, scene: nil, hostId: host2.id, sessionPersistentIdentifier: "session-host2")
+
+        let deduped = MultiWindowManager.shared.deduplicateWindows()
+        XCTAssertFalse(deduped.contains(host1.id))
+        XCTAssertFalse(deduped.contains(host2.id))
+
+        let entry1 = MultiWindowManager.shared.entry(for: sm1)
+        let entry2 = MultiWindowManager.shared.entry(for: sm2)
+
+        XCTAssertEqual(entry1?.status, .owned)
+        XCTAssertEqual(entry1?.hostId, host1.id)
+        XCTAssertEqual(entry2?.status, .owned)
+        XCTAssertEqual(entry2?.hostId, host2.id)
+    }
+
+    @MainActor
+    func testDeduplicateWindowsPreservesUntargetedWindows() {
+        let smUntargeted1 = SessionManager()
+        let smUntargeted2 = SessionManager()
+
+        MultiWindowManager.shared.forceMultipleWindowsForTesting = true
+        defer {
+            MultiWindowManager.shared.forceMultipleWindowsForTesting = nil
+            MultiWindowManager.shared.unregister(sessionManager: smUntargeted1)
+            MultiWindowManager.shared.unregister(sessionManager: smUntargeted2)
+        }
+
+        MultiWindowManager.shared.register(sessionManager: smUntargeted1, scene: nil, hostId: nil, sessionPersistentIdentifier: "session-untargeted-1")
+        MultiWindowManager.shared.register(sessionManager: smUntargeted2, scene: nil, hostId: nil, sessionPersistentIdentifier: "session-untargeted-2")
+
+        MultiWindowManager.shared.deduplicateWindows()
+
+        let entry1 = MultiWindowManager.shared.entry(for: smUntargeted1)
+        let entry2 = MultiWindowManager.shared.entry(for: smUntargeted2)
+
+        XCTAssertNotEqual(entry1?.status, .closing, "Untargeted window 1 should not be closed by deduplicateWindows")
+        XCTAssertNotEqual(entry2?.status, .closing, "Untargeted window 2 should not be closed by deduplicateWindows")
+    }
+
+    @MainActor
+    func testInitialLaunchClaimHostDoesNotCloseWhenNoActiveOtherScene() {
+        let host = HostProfile(name: "InitialHost", hostname: "initial.local")
+        let sm = SessionManager()
+        defer {
+            MultiWindowManager.shared.unregister(sessionManager: sm)
+        }
+
+        // On fresh launch, claimHost for the auto-connect host should succeed as .claimed
+        let claimResult = MultiWindowManager.shared.claimHost(host.id, for: sm, scene: nil)
+        switch claimResult {
+        case .claimed:
+            // Succeeded as expected
+            break
+        case .alreadyClaimed:
+            XCTFail("claimHost should not return alreadyClaimed when no active scene holds the host")
+        }
+
+        let entry = MultiWindowManager.shared.entry(for: sm)
+        XCTAssertEqual(entry?.status, .owned)
+        XCTAssertEqual(entry?.hostId, host.id)
     }
 
     // MARK: - R3: Startup Intents & Quick-Action Acceptance Tests

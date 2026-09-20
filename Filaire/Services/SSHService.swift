@@ -26,7 +26,7 @@ public enum SSHError: LocalizedError {
         case .notConnected:
             return "Not connected to SSH server."
         case .keyNotFound:
-            return "Configured SSH key not found in Keychain."
+            return "Unable to retrieve SSH key from secure storage. The key may need to be regenerated."
         case .negotiationFailed(let msg):
             return msg
         case .terminalSetupFailed(let msg):
@@ -1151,9 +1151,70 @@ public actor SSHService {
         }
     }
 
+    // MARK: - Public Key Installation
+
+    /// Logs in with a password and appends `publicKey` to the current user's `~/.ssh/authorized_keys`, the
+    /// way `ssh-copy-id` does.
+    ///
+    /// Opens its own short-lived connection and never touches `activeSession`, so installing a key cannot
+    /// disturb a live terminal. Throws when the host key is untrusted, authentication fails, or the remote
+    /// command exits non-zero or writes to stderr — the command is silent on success, so any output is a
+    /// real failure worth showing.
+    public static func installPublicKey(
+        _ publicKey: String,
+        on host: HostProfile,
+        password: String,
+        onUnknownHostKey: UnknownHostKeyHandler? = nil
+    ) async throws {
+        if let error = KeyInstaller.validate(host: host) { throw error }
+        if let error = KeyInstaller.validate(publicKey: publicKey) { throw error }
+
+        let authInfo = AttemptedAuthInfo(username: host.username)
+        let validator = SSHHostKeyValidator.custom(
+            TOFUHostKeyValidator(
+                hostname: host.hostname,
+                port: host.port,
+                onUnknownHostKey: onUnknownHostKey
+            )
+        )
+
+        var settings = SSHClientSettings(
+            host: host.hostname,
+            port: host.port,
+            authenticationMethod: {
+                SSHAuthenticationMethod.passwordBased(username: host.username, password: password)
+            },
+            hostKeyValidator: validator
+        )
+        settings.algorithms = Self.algorithms(for: host, rawKeyType: nil)
+
+        let bootstrap = ClientBootstrap(group: MultiThreadedEventLoopGroup.singleton)
+            .connectTimeout(settings.connectTimeout)
+            .channelOption(ChannelOptions.socket(SocketOptionLevel(SOL_SOCKET), SO_REUSEADDR), value: 1)
+            .channelOption(ChannelOptions.socket(SocketOptionLevel(IPPROTO_TCP), TCP_NODELAY), value: 1)
+
+        let channel = try await bootstrap.connect(host: settings.host, port: settings.port).get()
+
+        let client: SSHClient
+        do {
+            client = try await SSHClient.connect(on: channel, settings: settings)
+        } catch {
+            try? await channel.close().get()
+            throw Self.mapSSHError(error, for: host, authInfo: authInfo)
+        }
+
+        do {
+            _ = try await client.executeCommand(KeyInstaller.installCommand(for: publicKey))
+            try? await client.close()
+        } catch {
+            try? await client.close()
+            throw Self.mapSSHError(error, for: host, authInfo: authInfo)
+        }
+    }
+
     // MARK: - Authentication Resolver
  
-    private func resolveAuthMethod(
+    func resolveAuthMethod(
         for host: HostProfile,
         allKeys: [SSHKeyModel] = [],
         authContext: LAContext? = nil,
@@ -1172,13 +1233,14 @@ public actor SSHService {
                 self.lastAttemptedAuth = AttemptedAuthInfo(username: host.username)
                 throw SSHError.invalidCredentials("No SSH key selected for host.")
             }
+            let keyModel = allKeys.first(where: { $0.id == keyId })
+            let keyName = keyModel?.name ?? "SSH Key"
+
             guard let privateKeyStr = KeychainService.getPrivateKey(forKeyId: keyId, context: authContext) else {
-                self.lastAttemptedAuth = AttemptedAuthInfo(username: host.username, keyId: keyId)
+                self.lastAttemptedAuth = AttemptedAuthInfo(username: host.username, keyId: keyId, keyName: keyName)
                 throw SSHError.keyNotFound
             }
 
-            let keyModel = allKeys.first(where: { $0.id == keyId })
-            let keyName = keyModel?.name ?? "SSH Key"
             let passphrase = KeychainService.getKeyPassphrase(forKeyId: keyId, context: authContext)
 
             let keyInfo: SSHKeyGenerator.ParsedKeyInfo
@@ -1190,7 +1252,7 @@ public actor SSHService {
                     keyId: keyId,
                     keyName: keyName
                 )
-                throw SSHError.invalidCredentials("Failed to parse private key: \(error.localizedDescription)")
+                throw SSHError.invalidCredentials("Failed to parse private key: \(error.localizedDescription). The key may need to be regenerated.")
             }
 
             self.lastAttemptedAuth = AttemptedAuthInfo(
@@ -1212,14 +1274,14 @@ public actor SSHService {
                     let rsaKey = try SSHKeyGenerator.parseRSAPrivateKey(from: privateKeyStr, passphrase: passphrase)
                     return SSHAuthenticationMethod.rsa(username: host.username, privateKey: rsaKey)
                 } catch {
-                    throw SSHError.invalidCredentials("Failed to unlock RSA private key: \(error.localizedDescription)")
+                    throw SSHError.invalidCredentials("Failed to unlock RSA private key: \(error.localizedDescription). The key may need to be regenerated.")
                 }
             } else {
                 do {
                     let edKey = try SSHKeyGenerator.parseEd25519PrivateKey(from: privateKeyStr, passphrase: passphrase)
                     return SSHAuthenticationMethod.ed25519(username: host.username, privateKey: edKey)
                 } catch {
-                    throw SSHError.invalidCredentials("Failed to unlock Ed25519 private key: \(error.localizedDescription)")
+                    throw SSHError.invalidCredentials("Failed to unlock Ed25519 private key: \(error.localizedDescription). The key may need to be regenerated.")
                 }
             }
         }

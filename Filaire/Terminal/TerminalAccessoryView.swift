@@ -8,10 +8,14 @@ public protocol FilaireAccessoryDelegate: AnyObject {
     func accessoryDidToggleAlt(isActive: Bool)
     func accessoryDidRequestDismissKeyboard()
     func accessoryDidRequestPaste()
+    func accessoryDidRequestComposer()
+    func accessoryDidRequestSnippets()
 }
 
 public extension FilaireAccessoryDelegate {
     func accessoryDidRequestPaste() {}
+    func accessoryDidRequestComposer() {}
+    func accessoryDidRequestSnippets() {}
 }
 
 public final class FilaireAccessoryView: UIInputView, UIInputViewAudioFeedback {
@@ -84,6 +88,23 @@ public final class FilaireAccessoryView: UIInputView, UIInputViewAudioFeedback {
         action: #selector(didTapPaste)
     )
 
+    private lazy var composeButton: UIButton = makeButton(
+        title: "Compose",
+        action: #selector(didTapCompose)
+    )
+
+    private lazy var snippetsButton: UIButton = makeButton(
+        title: "Snippets",
+        action: #selector(didTapSnippets)
+    )
+
+    /// Pinned outside the scrolling row: as the last item in a long scroll view it was unreachable on a
+    /// phone without scrolling to the far end, leaving no way to put the keyboard away.
+    private lazy var dismissKeyboardButton: UIButton = makeIconButton(
+        systemName: "keyboard.chevron.compact.down",
+        action: #selector(didTapDismissKeyboard)
+    )
+
     private lazy var ctrlCButton: UIButton = makeButton(
         title: "Ctrl-C",
         action: #selector(didTapCtrlC)
@@ -107,6 +128,7 @@ public final class FilaireAccessoryView: UIInputView, UIInputViewAudioFeedback {
     public init(frame: CGRect = .zero, delegate: FilaireAccessoryDelegate? = nil) {
         self.accessoryDelegate = delegate
         super.init(frame: frame, inputViewStyle: .keyboard)
+        allowsSelfSizing = true
         setupView()
     }
 
@@ -132,20 +154,24 @@ public final class FilaireAccessoryView: UIInputView, UIInputViewAudioFeedback {
         stackView.translatesAutoresizingMaskIntoConstraints = false
         stackView.axis = .horizontal
         stackView.spacing = 6
-        stackView.alignment = .center
+        stackView.alignment = .fill
         stackView.distribution = .fill
         scrollView.addSubview(stackView)
 
-        // 1. Dedicated Tmux prefix and copy mode buttons
+        // 1. Composing tools: Compose and Snippets
+        stackView.addArrangedSubview(composeButton)
+        stackView.addArrangedSubview(snippetsButton)
+
+        // 2. Dedicated Tmux prefix and copy mode buttons
         stackView.addArrangedSubview(tmuxPrefixButton)
         stackView.addArrangedSubview(tmuxCopyModeButton)
 
-        // 2. Modifiers & Clipboard
+        // 3. Modifiers & Clipboard
         stackView.addArrangedSubview(ctrlButton)
         stackView.addArrangedSubview(altButton)
         stackView.addArrangedSubview(pasteButton)
 
-        // 3. Essential terminal keys
+        // 4. Essential terminal keys
         stackView.addArrangedSubview(escButton)
         stackView.addArrangedSubview(tabButton)
         stackView.addArrangedSubview(ctrlCButton)
@@ -153,25 +179,30 @@ public final class FilaireAccessoryView: UIInputView, UIInputViewAudioFeedback {
         stackView.addArrangedSubview(ctrlZButton)
         stackView.addArrangedSubview(ctrlLButton)
 
-        // 4. Directional arrows
+        // 5. Directional arrows
         stackView.addArrangedSubview(makeArrowButton(symbol: "arrow.left", action: #selector(didTapLeft)))
         stackView.addArrangedSubview(makeArrowButton(symbol: "arrow.up", action: #selector(didTapUp)))
         stackView.addArrangedSubview(makeArrowButton(symbol: "arrow.down", action: #selector(didTapDown)))
         stackView.addArrangedSubview(makeArrowButton(symbol: "arrow.right", action: #selector(didTapRight)))
 
-        // 5. Common terminal symbols
+        // 6. Common terminal symbols
         for symbol in ["|", "~", "/", "\\", "-", "_", "$", "`"] {
             stackView.addArrangedSubview(makeSymbolButton(symbol: symbol))
         }
 
-        // 6. Dismiss keyboard
-        let dismissButton = makeIconButton(
-            systemName: "keyboard.chevron.compact.down",
-            action: #selector(didTapDismissKeyboard)
-        )
-        stackView.addArrangedSubview(dismissButton)
+        // 7. Dismiss keyboard, pinned beside the scrolling row so it never scrolls out of reach.
+        //
+        // The scroll view stays a direct subview: it has no intrinsic width, so priorities rather than
+        // structure decide who yields. Without these the solver was free to starve the scroll view to zero
+        // and leave only this button, which persisted because the bar is built once and reused across
+        // keyboard presentations.
+        addSubview(dismissKeyboardButton)
+        dismissKeyboardButton.setContentHuggingPriority(.required, for: .horizontal)
+        dismissKeyboardButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+        scrollView.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        scrollView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let height: CGFloat = UIDevice.current.userInterfaceIdiom == .phone ? 38 : 40
+        let height: CGFloat = 44
 
         NSLayoutConstraint.activate([
             separator.topAnchor.constraint(equalTo: topAnchor),
@@ -179,11 +210,18 @@ public final class FilaireAccessoryView: UIInputView, UIInputViewAudioFeedback {
             separator.trailingAnchor.constraint(equalTo: trailingAnchor),
             separator.heightAnchor.constraint(equalToConstant: 0.5),
 
+            // No fixed height here: pinning top-and-bottom *and* a constant made the view 44.5pt tall while
+            // intrinsicContentSize declared 44, so Auto Layout had to break one of them on every relayout,
+            // and the one it dropped could be the trailing edge that gives the row its width.
             scrollView.topAnchor.constraint(equalTo: separator.bottomAnchor),
             scrollView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
-            scrollView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
+            scrollView.trailingAnchor.constraint(equalTo: dismissKeyboardButton.leadingAnchor, constant: -6),
             scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
-            scrollView.heightAnchor.constraint(equalToConstant: height),
+
+            dismissKeyboardButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
+            dismissKeyboardButton.centerYAnchor.constraint(equalTo: scrollView.centerYAnchor),
+            dismissKeyboardButton.heightAnchor.constraint(equalToConstant: height - 4),
+            dismissKeyboardButton.widthAnchor.constraint(equalToConstant: height - 4),
 
             stackView.topAnchor.constraint(equalTo: scrollView.topAnchor),
             stackView.bottomAnchor.constraint(equalTo: scrollView.bottomAnchor),
@@ -194,8 +232,7 @@ public final class FilaireAccessoryView: UIInputView, UIInputViewAudioFeedback {
     }
 
     public override var intrinsicContentSize: CGSize {
-        let height: CGFloat = UIDevice.current.userInterfaceIdiom == .phone ? 38 : 40
-        return CGSize(width: UIView.noIntrinsicMetric, height: height)
+        return CGSize(width: UIView.noIntrinsicMetric, height: 44)
     }
 
     public func resetStickyModifiers() {
@@ -212,12 +249,19 @@ public final class FilaireAccessoryView: UIInputView, UIInputViewAudioFeedback {
     ) -> UIButton {
         var config = UIButton.Configuration.plain()
         config.title = title
+        config.titleLineBreakMode = .byClipping
+        config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
+            var outgoing = incoming
+            outgoing.font = UIFont.monospacedSystemFont(ofSize: 12, weight: isAccent ? .bold : .medium)
+            return outgoing
+        }
         config.contentInsets = NSDirectionalEdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8)
         config.baseForegroundColor = isAccent ? SolarizedDarkTheme.cyan : SolarizedDarkTheme.base0
 
         let button = UIButton(configuration: config)
         button.translatesAutoresizingMaskIntoConstraints = false
-        button.titleLabel?.font = UIFont.monospacedSystemFont(ofSize: 12, weight: isAccent ? .bold : .medium)
+        button.titleLabel?.numberOfLines = 1
+        button.titleLabel?.lineBreakMode = .byClipping
 
         let bg = isAccent ? SolarizedDarkTheme.cyan.withAlphaComponent(0.25) : SolarizedDarkTheme.base03
         button.backgroundColor = bg
@@ -225,6 +269,9 @@ public final class FilaireAccessoryView: UIInputView, UIInputViewAudioFeedback {
         button.layer.borderWidth = isAccent ? 1.5 : 0.5
         button.layer.borderColor = (isAccent ? SolarizedDarkTheme.cyan : SolarizedDarkTheme.base01).cgColor
         button.addTarget(self, action: action, for: .touchUpInside)
+        button.widthAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+        button.setContentHuggingPriority(.required, for: .horizontal)
+        button.setContentCompressionResistancePriority(.required, for: .horizontal)
         return button
     }
 
@@ -242,6 +289,9 @@ public final class FilaireAccessoryView: UIInputView, UIInputViewAudioFeedback {
         button.layer.borderWidth = 0.5
         button.layer.borderColor = SolarizedDarkTheme.base01.cgColor
         button.addTarget(self, action: action, for: .touchUpInside)
+        button.widthAnchor.constraint(equalToConstant: 44).isActive = true
+        button.setContentHuggingPriority(.required, for: .horizontal)
+        button.setContentCompressionResistancePriority(.required, for: .horizontal)
         return button
     }
 
@@ -259,18 +309,27 @@ public final class FilaireAccessoryView: UIInputView, UIInputViewAudioFeedback {
         button.layer.borderWidth = 0.5
         button.layer.borderColor = SolarizedDarkTheme.base01.cgColor
         button.addTarget(self, action: action, for: .touchUpInside)
+        button.setContentHuggingPriority(.required, for: .horizontal)
+        button.setContentCompressionResistancePriority(.required, for: .horizontal)
         return button
     }
 
     private func makeSymbolButton(symbol: String) -> UIButton {
         var config = UIButton.Configuration.plain()
         config.title = symbol
+        config.titleLineBreakMode = .byClipping
+        config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
+            var outgoing = incoming
+            outgoing.font = UIFont.monospacedSystemFont(ofSize: 14, weight: .medium)
+            return outgoing
+        }
         config.baseForegroundColor = SolarizedDarkTheme.base0
         config.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 8, bottom: 6, trailing: 8)
 
         let button = UIButton(configuration: config)
         button.translatesAutoresizingMaskIntoConstraints = false
-        button.titleLabel?.font = UIFont.monospacedSystemFont(ofSize: 14, weight: .medium)
+        button.titleLabel?.numberOfLines = 1
+        button.titleLabel?.lineBreakMode = .byClipping
         button.backgroundColor = SolarizedDarkTheme.base03
         button.layer.cornerRadius = 6
         button.layer.borderWidth = 0.5
@@ -279,6 +338,9 @@ public final class FilaireAccessoryView: UIInputView, UIInputViewAudioFeedback {
             self?.playClick()
             self?.accessoryDelegate?.accessoryDidInsertText(symbol)
         }, for: .touchUpInside)
+        button.widthAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+        button.setContentHuggingPriority(.required, for: .horizontal)
+        button.setContentCompressionResistancePriority(.required, for: .horizontal)
         return button
     }
 
@@ -329,6 +391,16 @@ public final class FilaireAccessoryView: UIInputView, UIInputViewAudioFeedback {
     @objc private func didTapPaste() {
         playClick()
         accessoryDelegate?.accessoryDidRequestPaste()
+    }
+
+    @objc private func didTapCompose() {
+        playClick()
+        accessoryDelegate?.accessoryDidRequestComposer()
+    }
+
+    @objc private func didTapSnippets() {
+        playClick()
+        accessoryDelegate?.accessoryDidRequestSnippets()
     }
 
     @objc private func didTapCtrlC() {

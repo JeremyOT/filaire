@@ -874,6 +874,59 @@ public final class SessionManager {
         handleDisconnect(error: error)
     }
 
+    // MARK: - Composed Input Submission
+
+    /// Recently admitted submission ids, so one deliberate action that arrives twice (a key command and a
+    /// raw hardware event, or a double tap) enqueues only once.
+    private var admittedSubmissionIDs: [UUID] = []
+    private static let maxRememberedSubmissionIDs = 64
+
+    /// Captures the live connection identity for a composed submission. Mints the connection id the same way
+    /// `send(data:)` does when no input has flowed yet. Returns nil unless a connection is established:
+    /// composed input requires more than the initial-connect leniency ordinary keystrokes get.
+    public func captureSubmissionTarget() -> TerminalSubmissionTarget? {
+        guard state == .connected, let hostID = activeHost?.id else { return nil }
+        if currentConnectionId == nil {
+            currentConnectionId = UUID()
+        }
+        guard let connectionID = currentConnectionId else { return nil }
+        return TerminalSubmissionTarget(hostID: hostID, connectionID: connectionID)
+    }
+
+    /// True while `target` still describes the live connection.
+    public func isSubmissionTargetValid(_ target: TerminalSubmissionTarget) -> Bool {
+        guard state == .connected,
+              let hostID = activeHost?.id,
+              let connectionID = currentConnectionId else {
+            return false
+        }
+        return target == TerminalSubmissionTarget(hostID: hostID, connectionID: connectionID)
+    }
+
+    /// Admits a prepared submission as one ordered queue item, or rejects it having sent zero bytes. Runs to
+    /// completion on the main actor with no suspension, so pending capacity cannot change between the check
+    /// and the enqueue. Callers must not also send the payload through the terminal delegate.
+    @discardableResult
+    public func admit(_ submission: PreparedTerminalSubmission) -> TerminalSubmissionAdmission {
+        guard !admittedSubmissionIDs.contains(submission.id) else { return .duplicate }
+        guard state == .connected, activeHost != nil else { return .notConnected }
+        guard isSubmissionTargetValid(submission.target) else { return .staleTarget }
+
+        let required = submission.payload.count
+        let pending = pendingOutboundBufferSize
+        let (projected, overflow) = pending.addingReportingOverflow(required)
+        guard !overflow, projected <= Self.maxOutboundBufferSize else {
+            return .queueFull(available: max(0, Self.maxOutboundBufferSize - pending), required: required)
+        }
+
+        admittedSubmissionIDs.append(submission.id)
+        if admittedSubmissionIDs.count > Self.maxRememberedSubmissionIDs {
+            admittedSubmissionIDs.removeFirst(admittedSubmissionIDs.count - Self.maxRememberedSubmissionIDs)
+        }
+        send(data: submission.payload)
+        return .accepted
+    }
+
     // MARK: - Tmux Quick Actions
 
     public func triggerTmuxWindowNumber(_ num: Int) {
@@ -909,9 +962,33 @@ public final class SessionManager {
         send(data: Array("\u{1b}[9991~".utf8))
     }
 
+    public func triggerTmuxJoinVertical() {
+        guard let host = activeHost, host.autoConnectTmux else { return }
+        // Bound to join-pane -h by HostProfile.tmuxStartupCommand
+        send(data: Array("\u{1b}[9992~".utf8))
+    }
+
+    public func triggerTmuxJoinHorizontal() {
+        guard let host = activeHost, host.autoConnectTmux else { return }
+        // Bound to join-pane -v by HostProfile.tmuxStartupCommand
+        send(data: Array("\u{1b}[9993~".utf8))
+    }
+
+    /// tmux select-pane -m: marks or unmarks the current pane.
+    public func triggerTmuxMarkPane() {
+        guard let host = activeHost, host.autoConnectTmux else { return }
+        send(data: [host.tmuxPrefixByte, UInt8(ascii: "m")])
+    }
+
     public func triggerTmuxZoomPane() {
         guard let host = activeHost, host.autoConnectTmux else { return }
         send(data: [host.tmuxPrefixByte, UInt8(ascii: "z")])
+    }
+
+    /// tmux break-pane: moves the current pane into its own window.
+    public func triggerTmuxBreakPane() {
+        guard let host = activeHost, host.autoConnectTmux else { return }
+        send(data: [host.tmuxPrefixByte, UInt8(ascii: "!")])
     }
 
     public func triggerTmuxClosePane() {
@@ -1084,10 +1161,6 @@ public final class SessionManager {
     }
 
     internal func handleConnectFailure(error: Error, attemptId: UUID? = nil) async {
-        // Capture before resetting: was this attempt part of an auto-reconnect cycle or a session resume?
-        let attemptsSoFar = self.reconnectAttempt
-        let wasResuming = self.isResumingSession
-
         if let oldId = self.currentConnectionId?.uuidString {
             filePreviewManager.cancelSession(oldId)
         }
@@ -1097,6 +1170,7 @@ public final class SessionManager {
         self.isPreviewPaused = false
         self.connectionEstablishedTime = nil
         self.isConnecting = false
+        self.isResumingSession = false
         self.reconnectTask?.cancel()
         self.reconnectTask = nil
         self.reconnectAttempt = 0
@@ -1143,21 +1217,6 @@ public final class SessionManager {
             return
         }
 
-        if attemptsSoFar > 0 || wasResuming,
-           Self.isRetryableConnectError(error),
-           !isAppInBackground,
-           attemptsSoFar < maxReconnectAttempts,
-           activeHost != nil {
-            let attempt = attemptsSoFar + 1
-            self.reconnectAttempt = attempt
-            self.lastError = errorMessage
-            self.state = .reconnecting(attempt: attempt)
-            let retryId = UUID()
-            self.currentConnectionId = retryId
-            scheduleReconnect(delaySeconds: Self.reconnectDelay(forAttempt: attempt), connectionId: retryId)
-            return
-        }
-
         self.lastError = errorMessage
         self.state = .failed(errorMessage)
     }
@@ -1189,7 +1248,15 @@ public final class SessionManager {
         authInfo: AttemptedAuthInfo? = nil
     ) -> String {
         if let sshError = error as? SSHError {
-            return sshError.localizedDescription
+            switch sshError {
+            case .keyNotFound:
+                if let keyName = authInfo?.keyName {
+                    return "Unable to retrieve SSH key '\(keyName)' from secure storage. The key may need to be regenerated."
+                }
+                return sshError.localizedDescription
+            default:
+                return sshError.localizedDescription
+            }
         }
 
         let username = host?.username ?? "user"

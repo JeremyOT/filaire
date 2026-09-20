@@ -1129,6 +1129,7 @@ public final class MultiWindowManager: NSObject, ObservableObject {
             }
         }
 
+
         // If this session manager previously held another host, mark previous host for teardown
         let oldHostId = entries[id]?.hostId ?? pid.flatMap { records[$0]?.hostId }
         if let oldHostId = oldHostId, oldHostId != hostId {
@@ -1177,8 +1178,51 @@ public final class MultiWindowManager: NSObject, ObservableObject {
         return .claimed
     }
 
-    /// Scans all registered window entries and connected scenes, deduplicating any multiple windows
-    /// that are currently open for or associated with the same host.
+    /// Determines the host ID associated with a given scene session.
+    public static func hostId(for session: UISceneSession) -> UUID? {
+        if let hostIdStr = session.userInfo?[QuickActionManager.hostIdUserInfoKey] as? String,
+           let id = UUID(uuidString: hostIdStr) {
+            return id
+        }
+        if let activity = session.stateRestorationActivity ?? (session.scene as? UIWindowScene)?.userActivity {
+            if let hostIdStr = activity.userInfo?[QuickActionManager.hostIdUserInfoKey] as? String,
+               let id = UUID(uuidString: hostIdStr) {
+                return id
+            }
+            if let targetId = activity.targetContentIdentifier,
+               targetId.hasPrefix("io.o-t.filaire.host."),
+               let id = UUID(uuidString: targetId.replacingOccurrences(of: "io.o-t.filaire.host.", with: "")) {
+                return id
+            }
+        }
+        if let scene = session.scene as? UIWindowScene {
+            if let hostIdStr = scene.session.userInfo?[QuickActionManager.hostIdUserInfoKey] as? String,
+               let id = UUID(uuidString: hostIdStr) {
+                return id
+            }
+        }
+        return nil
+    }
+
+    /// Determines the host ID associated with a session, falling back to in-memory records and entries.
+    public func hostId(for session: UISceneSession) -> UUID? {
+        let pid = session.persistentIdentifier
+        if let hid = records[pid]?.hostId {
+            return hid
+        }
+        if let hid = entries.values.first(where: { $0.sessionPersistentIdentifier == pid })?.hostId {
+            return hid
+        }
+        return Self.hostId(for: session)
+    }
+
+    /// Determines the host ID associated with a window scene.
+    public func hostId(for scene: UIWindowScene) -> UUID? {
+        hostId(for: scene.session)
+    }
+
+    /// Scans all registered window entries and open sessions/scenes, deduplicating any multiple windows
+    /// that are currently open for or associated with the same host so there is at most one active window per host.
     @discardableResult
     public func deduplicateWindows() -> [UUID] {
         cleanupStaleEntries()
@@ -1289,6 +1333,9 @@ public final class MultiWindowManager: NSObject, ObservableObject {
                     QuickActionManager.shared.tagScene(dupScene, withHostId: nil)
                     dupScene.session.userInfo?[QuickActionManager.hostIdUserInfoKey] = nil
                     closeSceneIfMultiple(dupScene)
+                } else if let pid = dupEntry.sessionPersistentIdentifier,
+                          let openSession = UIApplication.shared.openSessions.first(where: { $0.persistentIdentifier == pid }) {
+                    closeSessionIfMultiple(openSession)
                 }
             }
 
@@ -1307,13 +1354,83 @@ public final class MultiWindowManager: NSObject, ObservableObject {
             }
         }
 
+        // Deduplicate across all open sessions in UIApplication.shared.openSessions
+        let openSessions = UIApplication.shared.openSessions.filter { session in
+            session.role == .windowApplication && !sessionsWithDestructionInFlight.contains(session.persistentIdentifier)
+        }
+
+        var hostToSessions: [UUID: [UISceneSession]] = [:]
+        for session in openSessions {
+            if let hostId = self.hostId(for: session) {
+                if !QuickActionManager.shared.isHostDeleted(hostId) {
+                    hostToSessions[hostId, default: []].append(session)
+                }
+            }
+        }
+
+        for (hostId, sessions) in hostToSessions where sessions.count > 1 {
+            if !dedupedHostIds.contains(hostId) {
+                dedupedHostIds.append(hostId)
+            }
+
+            let sortedSessions = sessions.sorted { s1, s2 in
+                let sc1 = s1.scene as? UIWindowScene
+                let sc2 = s2.scene as? UIWindowScene
+
+                let a1 = sc1?.activationState == .foregroundActive
+                let a2 = sc2?.activationState == .foregroundActive
+                if a1 != a2 { return a1 }
+
+                let att1 = sc1 != nil && sc1?.activationState != .unattached
+                let att2 = sc2 != nil && sc2?.activationState != .unattached
+                if att1 != att2 { return att1 }
+
+                let sm1 = records[s1.persistentIdentifier]?.sessionManager ?? entries.values.first(where: { $0.sessionPersistentIdentifier == s1.persistentIdentifier })?.sessionManager
+                let sm2 = records[s2.persistentIdentifier]?.sessionManager ?? entries.values.first(where: { $0.sessionPersistentIdentifier == s2.persistentIdentifier })?.sessionManager
+
+                let c1 = sm1?.state == .connected
+                let c2 = sm2?.state == .connected
+                if c1 != c2 { return c1 }
+
+                let b1 = sm1?.state.isBusy ?? false
+                let b2 = sm2?.state.isBusy ?? false
+                if b1 != b2 { return b1 }
+
+                let o1 = records[s1.persistentIdentifier]?.status == .owned || entries.values.first(where: { $0.sessionPersistentIdentifier == s1.persistentIdentifier })?.status == .owned
+                let o2 = records[s2.persistentIdentifier]?.status == .owned || entries.values.first(where: { $0.sessionPersistentIdentifier == s2.persistentIdentifier })?.status == .owned
+                if o1 != o2 { return o1 }
+
+                let t1 = records[s1.persistentIdentifier]?.lastInteractionTime ?? entries.values.first(where: { $0.sessionPersistentIdentifier == s1.persistentIdentifier })?.lastInteractionTime ?? .distantPast
+                let t2 = records[s2.persistentIdentifier]?.lastInteractionTime ?? entries.values.first(where: { $0.sessionPersistentIdentifier == s2.persistentIdentifier })?.lastInteractionTime ?? .distantPast
+                if t1 != t2 { return t1 > t2 }
+
+                let hasScene1 = sc1 != nil
+                let hasScene2 = sc2 != nil
+                if hasScene1 != hasScene2 { return hasScene1 }
+
+                return s1.persistentIdentifier > s2.persistentIdentifier
+            }
+
+            guard let survivor = sortedSessions.first else { continue }
+            for dupSession in sortedSessions.dropFirst() {
+                guard dupSession.persistentIdentifier != survivor.persistentIdentifier else { continue }
+                closeSessionIfMultiple(dupSession)
+            }
+        }
+
+        // Close orphaned sessions for deleted hosts
+        for session in openSessions {
+            if let hostId = self.hostId(for: session), QuickActionManager.shared.isHostDeleted(hostId) {
+                closeSessionIfMultiple(session)
+            }
+        }
+
+        // Deduplicate connected scenes as well
         let connectedScenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
         var sceneHostMap: [UUID: [UIWindowScene]] = [:]
         for scene in connectedScenes where scene.activationState != .unattached {
-            for hostId in hostToEntries.keys {
-                if QuickActionManager.isScene(scene, associatedWith: hostId) {
-                    sceneHostMap[hostId, default: []].append(scene)
-                }
+            if let hostId = self.hostId(for: scene) {
+                sceneHostMap[hostId, default: []].append(scene)
             }
         }
         for (hostId, scenes) in sceneHostMap where scenes.count > 1 {
@@ -1716,9 +1833,13 @@ public final class MultiWindowManager: NSObject, ObservableObject {
         let excludingScene = sessionManager.flatMap { entries[ObjectIdentifier($0)]?.scene }
         if let excludingScene = excludingScene {
             let connectedScenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-            return QuickActionManager.findScene(for: hostId, in: connectedScenes.filter { $0 !== excludingScene }) != nil
+            if QuickActionManager.findScene(for: hostId, in: connectedScenes.filter { $0 !== excludingScene }) != nil {
+                return true
+            }
+        } else if QuickActionManager.findScene(for: hostId) != nil {
+            return true
         }
-        return QuickActionManager.findScene(for: hostId) != nil
+        return false
     }
 
     internal func cleanupStaleEntries() {
@@ -1910,7 +2031,7 @@ public final class MultiWindowManager: NSObject, ObservableObject {
         guard let record = records[pid] else { return }
         let sm = record.sessionManager
         guard sm.activeHost != nil, !sm.isIntentionalDisconnect else { return }
-        if sm.state == .disconnected || sm.state.isFailed {
+        if sm.state == .disconnected {
             sm.reconnect()
         }
     }
@@ -1925,12 +2046,17 @@ public final class MultiWindowManager: NSObject, ObservableObject {
         if let validScene = scene {
             return closeSceneIfMultiple(validScene)
         }
-        guard hasMultipleOpenWindows else {
-            return false
-        }
         let pid = records.values.first(where: { $0.sessionManager === sessionManager })?.persistentIdentifier
             ?? entries[id]?.sessionPersistentIdentifier
             ?? UUID().uuidString
+
+        if let openSession = UIApplication.shared.openSessions.first(where: { $0.persistentIdentifier == pid }) {
+            return closeSessionIfMultiple(openSession)
+        }
+
+        guard hasMultipleOpenWindows else {
+            return false
+        }
 
         if let record = records[pid] {
             record.status = .closing
@@ -1957,11 +2083,10 @@ public final class MultiWindowManager: NSObject, ObservableObject {
         return true
     }
 
-    /// Closes the specified window scene if it isn't the last open session/window.
+    /// Closes the specified scene session if it isn't the last open session/window.
     /// Returns true if destruction was requested, false if this is the last open session/window.
     @discardableResult
-    public func closeSceneIfMultiple(_ scene: UIWindowScene) -> Bool {
-        let session = scene.session
+    public func closeSessionIfMultiple(_ session: UISceneSession) -> Bool {
         let pid = session.persistentIdentifier
         if sessionsWithDestructionInFlight.contains(pid) {
             return true
@@ -1972,10 +2097,15 @@ public final class MultiWindowManager: NSObject, ObservableObject {
         sessionsWithDestructionInFlight.insert(pid)
 
         // 1. Untag and clear the closing scene session so it cannot re-claim the host
-        QuickActionManager.shared.tagScene(scene, withHostId: nil)
-        scene.session.userInfo?[QuickActionManager.hostIdUserInfoKey] = nil
-        scene.userActivity = nil
-        scene.session.stateRestorationActivity = nil
+        let scene = session.scene as? UIWindowScene
+        if let scene = scene {
+            QuickActionManager.shared.tagScene(scene, withHostId: nil)
+            scene.userActivity = nil
+            scene.activationConditions.canActivateForTargetContentIdentifierPredicate = NSPredicate(value: true)
+            scene.activationConditions.prefersToActivateForTargetContentIdentifierPredicate = NSPredicate(value: false)
+        }
+        session.userInfo?[QuickActionManager.hostIdUserInfoKey] = nil
+        session.stateRestorationActivity = nil
 
         if let record = records[pid] {
             record.status = .closing
@@ -1983,7 +2113,7 @@ public final class MultiWindowManager: NSObject, ObservableObject {
             record.sessionManager.activeHost = nil
             syncEntry(for: record)
         }
-        for (id, var entry) in entries where entry.sessionPersistentIdentifier == pid || entry.scene === scene {
+        for (id, var entry) in entries where entry.sessionPersistentIdentifier == pid || (scene != nil && entry.scene === scene) {
             entry.status = .closing
             entry.hostId = nil
             entry.sessionManager?.activeHost = nil
@@ -2014,6 +2144,13 @@ public final class MultiWindowManager: NSObject, ObservableObject {
             self?.sessionsWithDestructionInFlight.remove(pid)
         }
         return true
+    }
+
+    /// Closes the specified window scene if it isn't the last open session/window.
+    /// Returns true if destruction was requested, false if this is the last open session/window.
+    @discardableResult
+    public func closeSceneIfMultiple(_ scene: UIWindowScene) -> Bool {
+        closeSessionIfMultiple(scene.session)
     }
 
     /// Checks if a window dedicated to the host is currently in the active foreground and has user focus.

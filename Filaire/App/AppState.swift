@@ -127,6 +127,7 @@ public final class AppState {
         }
         QuickActionManager.updateQuickActions(for: hosts)
         setupCrossWindowSync()
+        SnippetStore.shared.load()
 
         sessionManager.onKeyMigrated = { [weak self] keyId, keyType, pubKey in
             guard let self = self else { return }
@@ -279,8 +280,9 @@ public final class AppState {
         if let data = keysData,
            let decoded = try? JSONDecoder().decode([SSHKeyModel].self, from: data) {
             self.keys = decoded
-            migrateLegacyKeysIfNeeded()
         }
+
+        migrateLegacyKeysIfNeeded()
 
         if UIDevice.current.userInterfaceIdiom != .pad || !UIApplication.shared.supportsMultipleScenes {
             let activeHostString = UserDefaults.standard.string(forKey: activeHostKey)

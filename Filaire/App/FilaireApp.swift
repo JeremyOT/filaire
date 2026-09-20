@@ -335,8 +335,7 @@ struct WindowRootView: View {
                     }
                     // Auto-reconnect if the session dropped while this window was inactive
                     let sm = appState.sessionManager
-                    if sm.activeHost != nil, !sm.isIntentionalDisconnect,
-                       (sm.state == .disconnected || sm.state.isFailed) {
+                    if sm.activeHost != nil, !sm.isIntentionalDisconnect, sm.state == .disconnected {
                         sm.reconnect()
                     }
                 } else if newPhase == .background {
@@ -447,17 +446,19 @@ struct WindowRootView: View {
                 QuickActionManager.shared.tagScene(scene, withHostId: hostId)
                 bootstrapState = .ready
             case .alreadyClaimed(let existingScene):
-                if let existing = existingScene ?? MultiWindowManager.shared.findScene(for: hostId) {
+                let activeOtherScene = existingScene ?? MultiWindowManager.shared.findScene(for: hostId)
+                if let existing = activeOtherScene, existing !== scene, existing.activationState != .unattached {
                     QuickActionManager.shared.activateScene(existing, hostId: hostId)
+                    if MultiWindowManager.shared.hasMultipleOpenWindows {
+                        bootstrapState = .closing
+                        MultiWindowManager.shared.closeSceneIfMultiple(scene)
+                        return
+                    }
                 }
-                if MultiWindowManager.shared.hasMultipleOpenWindows {
-                    bootstrapState = .closing
-                    MultiWindowManager.shared.closeSceneIfMultiple(scene)
-                    return
-                } else {
-                    bootstrapState = .ready
-                    appState.autoConnectIfNeeded()
-                }
+                // No other active attached scene holds the host; this window connects to host
+                appState.connect(to: host)
+                QuickActionManager.shared.tagScene(scene, withHostId: hostId)
+                bootstrapState = .ready
             }
         } else {
             // Untargeted system-created window with no auto-connect:
@@ -504,6 +505,7 @@ struct MainContentView: View {
         if showingHostManagement { return true }
         if appState.sessionManager.pendingSecurityPrompt != nil { return true }
         if appState.sessionManager.filePreviewManager.previewURL != nil { return true }
+        if MultiWindowManager.shared.terminalContext(for: appState.sessionManager).interaction.isComposerPresented { return true }
         #if DEBUG
         if showingHostEditor || showingKeyManagementDemo { return true }
         #endif
@@ -558,7 +560,9 @@ struct MainContentView: View {
                         }
                     )
                     .padding(.top, topInset + (UIDevice.current.userInterfaceIdiom == .phone ? 40 : 0))
-                    .ignoresSafeArea(edges: .bottom)
+                    // .container only: the terminal still extends under the home indicator, but the
+                    // keyboard region is respected so the software keyboard never covers output.
+                    .ignoresSafeArea(.container, edges: .bottom)
 
                     // Tap outside expanded status bar dismisses it immediately
                     if appState.isStatusExpanded {
@@ -637,7 +641,9 @@ struct MainContentView: View {
                 }
             }
         }
-        .ignoresSafeArea()
+        // .container so the root still fills the display but yields to the keyboard; the background Color
+        // keeps its own blanket ignoresSafeArea, so nothing stops covering the screen edge to edge.
+        .ignoresSafeArea(.container)
         .sheet(isPresented: $showingHostManagement) {
             HostListView(
                 hosts: $appState.hosts,

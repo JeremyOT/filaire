@@ -3,11 +3,23 @@ import UIKit
 import SwiftTerm
 import UserNotifications
 
+/// Identifiable wrappers so snippet sheets can be driven by optional state.
+struct SnippetInvocationBox: Identifiable {
+    let invocation: TerminalInteractionState.SnippetInvocation
+    var id: UUID { invocation.snippet.id }
+}
+
+struct SnippetDraftBox: Identifiable {
+    let snippet: CommandSnippet
+    var id: UUID { snippet.id }
+}
+
 public struct TerminalContainerView: View {
     public let sessionManager: SessionManager
     public var isStatusExpanded: Bool = false
     public var isCoveredByPresentation: Bool = false
     public var onUserInput: (() -> Void)?
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     public init(sessionManager: SessionManager, isStatusExpanded: Bool = false, isCoveredByPresentation: Bool = false, onUserInput: (() -> Void)? = nil) {
         self.sessionManager = sessionManager
@@ -22,6 +34,7 @@ public struct TerminalContainerView: View {
         let autoConnectTmux = host?.autoConnectTmux ?? false
         let tmuxPrefixDisplay = host?.tmuxPrefixDisplay ?? "Ctrl-B"
         let tmuxPrefixByte = host?.tmuxPrefixByte ?? 0x02
+        let context = MultiWindowManager.shared.terminalContext(for: sessionManager)
 
         TerminalRepresentable(
             sessionManager: sessionManager,
@@ -33,6 +46,51 @@ public struct TerminalContainerView: View {
             onUserInput: onUserInput
         )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay(alignment: .bottom) {
+                // Regular width keeps the terminal visible behind a bottom editor; compact uses a sheet.
+                if horizontalSizeClass != .compact && context.interaction.isComposerPresented {
+                    CommandComposerView(context: context, interaction: context.interaction)
+                        .frame(maxWidth: 720)
+                        .padding(12)
+                }
+            }
+            .sheet(isPresented: Binding(
+                get: { horizontalSizeClass == .compact && context.interaction.isComposerPresented },
+                set: { if !$0 { context.closeComposer() } }
+            )) {
+                CommandComposerView(context: context, interaction: context.interaction)
+                    .padding(.top, 8)
+                    .presentationDetents([.medium, .large])
+                    .presentationBackground(Color(uiColor: SolarizedDarkTheme.base03))
+            }
+            .sheet(isPresented: Binding(
+                get: { context.interaction.isSnippetLibraryPresented },
+                set: { if !$0 { context.closeSnippetLibrary() } }
+            )) {
+                SnippetLibraryView(context: context, interaction: context.interaction)
+            }
+            // Only for the paths that reach these without the library, such as Save as snippet from the
+            // composer. While the library is up it presents them itself.
+            .sheet(item: Binding(
+                get: {
+                    context.interaction.isSnippetLibraryPresented
+                        ? nil
+                        : context.interaction.snippetInvocation.map { SnippetInvocationBox(invocation: $0) }
+                },
+                set: { if $0 == nil { context.interaction.cancelInvocation() } }
+            )) { _ in
+                SnippetParameterView(context: context, interaction: context.interaction)
+            }
+            .sheet(item: Binding(
+                get: {
+                    context.interaction.isSnippetLibraryPresented
+                        ? nil
+                        : context.interaction.snippetEditorDraft.map { SnippetDraftBox(snippet: $0) }
+                },
+                set: { if $0 == nil { context.interaction.closeSnippetEditor() } }
+            )) { box in
+                SnippetEditorView(context: context, interaction: context.interaction, draft: box.snippet)
+            }
             .alert(
                 session.pendingSecurityPrompt?.title ?? "",
                 isPresented: Binding(
@@ -108,6 +166,7 @@ struct TerminalRepresentable: UIViewRepresentable {
     func updateUIView(_ uiView: FilaireTerminalView, context: Context) {
         context.coordinator.onUserInput = onUserInput
         context.coordinator.isCoveredByPresentation = isCoveredByPresentation
+        context.coordinator.syncComposerHost()
         if isCoveredByPresentation {
             uiView.cancelPendingFocusRequests()
         }
@@ -247,6 +306,14 @@ public final class TerminalSessionContext: NSObject, @preconcurrency TerminalVie
             self?.terminalDidReceiveUserInput()
         }
 
+        view.onComposerRequested = { [weak self] in
+            self?.openComposer(origin: .shortcut)
+        }
+
+        view.onSnippetsRequested = { [weak self] in
+            self?.openSnippetLibrary()
+        }
+
         // Wire incoming SSH output through bounded filter into SwiftTerm
         sessionManager.onTerminalOutput = { [weak self] bytes in
             self?.terminalView.feedBounded(byteArray: bytes[...])
@@ -279,6 +346,11 @@ public final class TerminalSessionContext: NSObject, @preconcurrency TerminalVie
             coordinator: self
         )
     }
+
+    /// Local-editor state for this scene: composer presentation and per-host drafts.
+    public let interaction = TerminalInteractionState()
+    private var focusIntentBeforeComposer: SceneFocusIntent = .terminal
+    private var wasTerminalFirstResponderBeforeComposer = false
 
     public var focusIntent: SceneFocusIntent = .terminal
     public var isCoveredByPresentation: Bool = false {
@@ -339,7 +411,155 @@ public final class TerminalSessionContext: NSObject, @preconcurrency TerminalVie
 
     public func teardown() {
         detachView()
+        interaction.teardown()
         terminalView.terminalDelegate = nil
+    }
+
+    // MARK: - Command Composer
+
+    public func openComposer(origin: TerminalInteractionState.ComposerOrigin) {
+        guard let hostID = sessionManager.activeHost?.id else {
+            sessionManager.showToast(title: "Compose", message: "Select a host before composing a command.")
+            return
+        }
+        takeLocalEditorFocus()
+        interaction.openComposer(forHost: hostID, origin: origin)
+    }
+
+    /// Scene-scoped prefill entry point for snippets. Fills the editor and never sends bytes.
+    public func openComposer(
+        with text: String,
+        containsSecretValues: Bool = false,
+        origin: TerminalInteractionState.ComposerOrigin = .snippet
+    ) {
+        guard let hostID = sessionManager.activeHost?.id else { return }
+        takeLocalEditorFocus()
+        interaction.openComposer(
+            with: text,
+            containsSecretValues: containsSecretValues,
+            forHost: hostID,
+            origin: origin
+        )
+    }
+
+    public func closeComposer() {
+        interaction.closeComposer()
+        restoreTerminalFocusAfterLocalEditor()
+    }
+
+    public func openSnippetLibrary() {
+        takeLocalEditorFocus()
+        interaction.openSnippetLibrary()
+    }
+
+    public func closeSnippetLibrary() {
+        interaction.closeSnippetLibrary()
+        if !interaction.isComposerPresented {
+            restoreTerminalFocusAfterLocalEditor()
+        }
+    }
+
+    /// Opens the snippet editor seeded with the composer's current text as a literal template.
+    public func saveDraftAsSnippet() {
+        let template = interaction.draftText
+        guard !template.isEmpty else { return }
+        // Never offer expanded secret values as literal template text.
+        guard !interaction.isDraftEphemeral else {
+            interaction.setInlineError("This draft contains expanded secret values, so it cannot be saved as a snippet.")
+            return
+        }
+        interaction.beginSnippetEditor(CommandSnippet(name: "", template: template))
+    }
+
+    /// Keeps the per-host draft cache aligned with the selected host; a switch closes the editor and never
+    /// carries text to the new host.
+    public func syncComposerHost() {
+        interaction.hostDidChange(to: sessionManager.activeHost?.id)
+    }
+
+    private func takeLocalEditorFocus() {
+        focusIntentBeforeComposer = focusIntent
+        wasTerminalFirstResponderBeforeComposer = terminalView.isFirstResponder
+        terminalView.cancelPendingFocusRequests()
+        focusIntent = .localEditor
+        terminalView.focusIntent = .localEditor
+    }
+
+    private func restoreTerminalFocusAfterLocalEditor() {
+        // Only an active, uncovered scene that already had the keyboard gets it back; a keyboard the user
+        // dismissed stays dismissed.
+        guard !isCoveredByPresentation,
+              sessionManager.pendingSecurityPrompt == nil,
+              focusIntentBeforeComposer == .terminal,
+              wasTerminalFirstResponderBeforeComposer else {
+            focusIntent = .none
+            terminalView.focusIntent = .none
+            return
+        }
+        focusIntent = .terminal
+        terminalView.focusIntent = .terminal
+        terminalView.scheduleFocusPromotion(delay: 0.05, reason: "composer closed")
+    }
+
+    /// Prepares and admits the current draft. Admission is not remote execution, so nothing here claims the
+    /// command ran.
+    @discardableResult
+    public func submitComposerDraft(action: TerminalSubmissionAction) -> TerminalSubmissionAdmission? {
+        guard !interaction.draftText.isEmpty else { return nil }
+        guard let target = sessionManager.captureSubmissionTarget() else {
+            interaction.setInlineError("Not connected. Your draft was kept.")
+            return .notConnected
+        }
+
+        let prepared = TerminalInputSubmission.prepare(
+            text: interaction.draftText,
+            action: action,
+            target: target,
+            bracketedPasteEnabled: terminalView.getTerminal().bracketedPasteMode
+        )
+
+        switch prepared {
+        case .failure(let error):
+            interaction.setInlineError(Self.message(for: error))
+            return nil
+
+        case .success(let submission):
+            if submission.didNormalizeLineEndings {
+                interaction.draftText = submission.normalizedText
+            }
+            let result = sessionManager.admit(submission)
+            switch result {
+            case .accepted:
+                // Semantic input state updates once, after admission, and the payload is not also sent
+                // through the terminal delegate.
+                terminalDidReceiveUserInput()
+                interaction.clearSubmittedDraft()
+                restoreTerminalFocusAfterLocalEditor()
+            case .notConnected:
+                interaction.setInlineError("Not connected. Your draft was kept.")
+            case .staleTarget:
+                interaction.setInlineError("The connection changed since you started. Review the command and try again.")
+            case .queueFull(let available, let required):
+                interaction.setInlineError("Not enough send capacity: \(required) bytes needed, \(available) available. Your draft was kept.")
+            case .duplicate:
+                break
+            }
+            return result
+        }
+    }
+
+    static func message(for error: TerminalSubmissionPreparationError) -> String {
+        switch error {
+        case .empty:
+            return "Nothing to send."
+        case .forbiddenControlCharacter(let scalar, let offset):
+            let code = String(format: "U+%04X", scalar.value)
+            return "Remove the control character \(code) at position \(offset); it cannot be sent as text."
+        case .multilineRequiresBracketedPaste:
+            return "Multiple lines need bracketed paste, which this remote application has not enabled. Send a single line instead."
+        case .tooLarge(let byteCount, let limit):
+            return "This draft is \(byteCount) bytes; the limit is \(limit)."
+        }
     }
 
     // Forward user keystrokes to SSH stdin

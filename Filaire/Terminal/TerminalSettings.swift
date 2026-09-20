@@ -68,14 +68,14 @@ public final class TerminalSettings {
     }
 
     /// Whether to display the bottom helper toolbar above the keyboard.
-    /// Defaults to true on iPhone (where thumb modifiers are essential)
-    /// and false on iPad (where hardware/Magic Keyboards are commonly attached).
+    /// Defaults to true on both iPhone and iPad so essential terminal modifiers
+    /// (Esc, Tab, Ctrl, Alt, Tmux, Arrows) are always available above the keyboard.
     public var showKeyboardAccessoryBar: Bool {
         get {
             if let saved = UserDefaults.standard.object(forKey: showAccessoryBarKey) as? Bool {
                 return saved
             }
-            return UIDevice.current.userInterfaceIdiom == .phone
+            return true
         }
         set {
             UserDefaults.standard.set(newValue, forKey: showAccessoryBarKey)

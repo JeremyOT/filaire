@@ -93,6 +93,11 @@ public enum KeychainService {
         delete(key: key)
     }
 
+    public static func hasPassword(forHostId hostId: UUID) -> Bool {
+        let key = "\(servicePrefix).host.\(hostId.uuidString).password"
+        return exists(key: key)
+    }
+
     // MARK: - SSH Private Key Management
 
     public static func savePrivateKey(_ privateKeyString: String, forKeyId keyId: UUID, requireBiometrics: Bool = true) throws {
@@ -112,6 +117,11 @@ public enum KeychainService {
         delete(key: key)
     }
 
+    public static func hasPrivateKey(forKeyId keyId: UUID) -> Bool {
+        let key = "\(servicePrefix).key.\(keyId.uuidString).private"
+        return exists(key: key)
+    }
+
     // MARK: - SSH Key Passphrase Management
 
     public static func saveKeyPassphrase(_ passphrase: String, forKeyId keyId: UUID, requireBiometrics: Bool = true) throws {
@@ -129,6 +139,11 @@ public enum KeychainService {
     public static func deleteKeyPassphrase(forKeyId keyId: UUID) {
         let key = "\(servicePrefix).key.\(keyId.uuidString).passphrase"
         delete(key: key)
+    }
+
+    public static func hasKeyPassphrase(forKeyId keyId: UUID) -> Bool {
+        let key = "\(servicePrefix).key.\(keyId.uuidString).passphrase"
+        return exists(key: key)
     }
 
     // MARK: - Low-level Secure Enclave & Keychain Primitives
@@ -302,6 +317,29 @@ public enum KeychainService {
         return getInternal(service: servicePrefix, key: key, context: context, backend: currentBackend)
     }
 
+    private static func exists(key: String) -> Bool {
+        let currentBackend = backend
+        let refKey = key + ".ref"
+        let refExists = itemExistsInternal(service: servicePrefix, key: refKey, backend: currentBackend)
+
+        if refExists {
+            if let refData = getInternal(service: servicePrefix, key: refKey, context: nil, backend: currentBackend),
+               let ref = try? JSONDecoder().decode(RefRecord.self, from: refData) {
+                let versionedKey = "\(key).v.\(ref.version)"
+                if itemExistsInternal(service: servicePrefix, key: versionedKey, backend: currentBackend) {
+                    return true
+                }
+            } else {
+                // ref item exists in Keychain but couldn't be decrypted/read (e.g. before first unlock).
+                // Do NOT consider it missing!
+                return true
+            }
+        }
+
+        // Direct key fallback (unversioned items)
+        return itemExistsInternal(service: servicePrefix, key: key, backend: currentBackend)
+    }
+
     private static func delete(key: String) {
         let currentBackend = backend
         let refKey = key + ".ref"
@@ -338,6 +376,18 @@ public enum KeychainService {
             return nil
         }
         return data
+    }
+
+    private static func itemExistsInternal(service: String, key: String, backend: any KeychainBackend) -> Bool {
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: key,
+            kSecUseAuthenticationUI: kSecUseAuthenticationUISkip,
+            kSecMatchLimit: kSecMatchLimitOne
+        ]
+        let status = backend.copyMatching(query as CFDictionary, nil)
+        return status != errSecItemNotFound
     }
 
     private static func deleteInternal(service: String, key: String, backend: any KeychainBackend) {

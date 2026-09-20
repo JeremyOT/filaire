@@ -307,9 +307,10 @@ public struct HostProfile: Identifiable, Codable, Equatable {
         let quotedSession = Self.shellQuoteIfNeeded(effectiveTmuxSession)
         // set-clipboard lets any program inside tmux write the iOS clipboard, so it is opt-in
         let setClipboard = enableTmuxSetClipboard ? "tmux set -s set-clipboard on 2>/dev/null; " : ""
-        // Binds the escape sequences sent for Cmd+D / Cmd+Shift+D to splits in the current pane's directory.
+        // Binds the escape sequences sent for Cmd+D / Cmd+Shift+D to splits in the current pane's directory,
+        // and Cmd+J / Cmd+Shift+J to join the marked pane vertically or horizontally.
         // Chained after new-session so a tmux that rejects them still attaches.
-        let splitBindings = " \\; set -s 'user-keys[900]' \"$(printf '\\033[9990~')\" \\; set -s 'user-keys[901]' \"$(printf '\\033[9991~')\" \\; bind -n User900 split-window -h -c '#{pane_current_path}' \\; bind -n User901 split-window -v -c '#{pane_current_path}'"
+        let splitBindings = " \\; set -s 'user-keys[900]' \"$(printf '\\033[9990~')\" \\; set -s 'user-keys[901]' \"$(printf '\\033[9991~')\" \\; set -s 'user-keys[902]' \"$(printf '\\033[9992~')\" \\; set -s 'user-keys[903]' \"$(printf '\\033[9993~')\" \\; bind -n User900 split-window -h -c '#{pane_current_path}' \\; bind -n User901 split-window -v -c '#{pane_current_path}' \\; bind -n User902 join-pane -h \\; bind -n User903 join-pane -v"
         if detachExistingTmux {
             return "\(setClipboard)exec tmux new-session -A -D -s \(quotedSession)\(splitBindings)\n"
         } else {

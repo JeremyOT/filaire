@@ -11,6 +11,7 @@ public struct StatusOverlayView: View {
     @ObservedObject public var windowManager: MultiWindowManager
 
     @State private var showingDiagnosticSheet: Bool = false
+    @State private var showingControlHelp: Bool = false
     @State private var copiedFeedback: String? = nil
     @State private var inactivityTimerTask: Task<Void, Never>? = nil
 
@@ -50,6 +51,16 @@ public struct StatusOverlayView: View {
         }
         .sheet(isPresented: $showingDiagnosticSheet) {
             diagnosticSheet
+        }
+        .sheet(isPresented: Binding(
+            get: { showingControlHelp },
+            set: { isPresented in
+                showingControlHelp = isPresented
+                // Hold the bar open behind the sheet, and start the timer again once it closes.
+                presentControlHelp(isPresented)
+            }
+        )) {
+            ControlHelpView()
         }
         .onChange(of: isExpanded) { _, expanded in
             if expanded {
@@ -358,8 +369,9 @@ public struct StatusOverlayView: View {
             .frame(minHeight: 44)
             .padding(.top, statusBarHeight)
 
-            if sessionManager.state == .connected && (sessionManager.activeHost?.autoConnectTmux ?? false) {
-                tmuxControlBar
+            if sessionManager.state == .connected {
+                terminalControlBar
+                    .simultaneousGesture(keepOpenWhileDragging)
             }
         }
         .background(
@@ -378,224 +390,401 @@ public struct StatusOverlayView: View {
         }
     }
 
-    private var tmuxControlBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                HStack(spacing: 4) {
-                    Image(systemName: "macwindow.on.rectangle")
-                        .font(.system(size: 11, weight: .bold))
-                    Text("tmux")
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
-                }
-                .padding(.horizontal, 7)
-                .padding(.vertical, 5)
-                .background(Color(uiColor: SolarizedDarkTheme.violet).opacity(0.2))
-                .foregroundStyle(Color(uiColor: SolarizedDarkTheme.violet))
-                .clipShape(Capsule())
+    /// Holds the bar open while a finger is down. Scrolling the bar is not a tap, so the inactivity timer
+    /// used to expire mid-drag while the user was still hunting for a control.
+    private var keepOpenWhileDragging: some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { _ in cancelInactivityTimer() }
+            .onEnded { _ in resetInactivityTimer() }
+    }
 
-                Divider()
-                    .frame(height: 16)
-                    .background(Color(uiColor: SolarizedDarkTheme.base01).opacity(0.4))
-
-                // Window numbers 0..9
-                HStack(spacing: 5) {
-                    ForEach(0...9, id: \.self) { num in
-                        Button(action: {
-                            resetInactivityTimer()
-                            triggerHapticFeedback()
-                            sessionManager.triggerTmuxWindowNumber(num)
-                        }) {
-                            Text("\(num)")
-                                .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                                .frame(width: 28, height: 28)
-                                .background(Color(uiColor: SolarizedDarkTheme.base03))
-                                .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base1))
-                                .clipShape(RoundedRectangle(cornerRadius: 6))
-                        }
-                        .buttonStyle(.plain)
-                        .hoverEffect(.highlight)
-                        .accessibilityLabel("Switch to tmux window \(num)")
-                    }
-                }
-
-                Divider()
-                    .frame(height: 16)
-                    .background(Color(uiColor: SolarizedDarkTheme.base01).opacity(0.4))
-
-                // Navigation: Prev / Next / New / Rename
-                HStack(spacing: 5) {
-                    Button(action: {
-                        resetInactivityTimer()
-                        triggerHapticFeedback()
-                        sessionManager.triggerTmuxPrevWindow()
-                    }) {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 11, weight: .semibold))
-                            .frame(width: 28, height: 28)
-                            .background(Color(uiColor: SolarizedDarkTheme.base03))
-                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base0))
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
-                    }
-                    .buttonStyle(.plain)
-                    .hoverEffect(.highlight)
-                    .accessibilityLabel("Previous tmux window")
-
-                    Button(action: {
-                        resetInactivityTimer()
-                        triggerHapticFeedback()
-                        sessionManager.triggerTmuxNextWindow()
-                    }) {
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 11, weight: .semibold))
-                            .frame(width: 28, height: 28)
-                            .background(Color(uiColor: SolarizedDarkTheme.base03))
-                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base0))
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
-                    }
-                    .buttonStyle(.plain)
-                    .hoverEffect(.highlight)
-                    .accessibilityLabel("Next tmux window")
-
-                    Button(action: {
-                        resetInactivityTimer()
-                        triggerHapticFeedback()
-                        sessionManager.triggerTmuxNewWindow()
-                    }) {
-                        Image(systemName: "plus")
-                            .font(.system(size: 11, weight: .semibold))
-                            .frame(width: 28, height: 28)
-                            .background(Color(uiColor: SolarizedDarkTheme.base03))
-                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.green))
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
-                    }
-                    .buttonStyle(.plain)
-                    .hoverEffect(.highlight)
-                    .accessibilityLabel("New tmux window")
-
-                    Button(action: {
-                        resetInactivityTimer()
-                        triggerHapticFeedback()
-                        sessionManager.triggerTmuxRenameWindow()
-                    }) {
-                        Image(systemName: "pencil.line")
-                            .font(.system(size: 11, weight: .semibold))
-                            .frame(width: 28, height: 28)
-                            .background(Color(uiColor: SolarizedDarkTheme.base03))
-                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
-                    }
-                    .buttonStyle(.plain)
-                    .hoverEffect(.highlight)
-                    .accessibilityLabel("Rename tmux window")
-                }
-
-                Divider()
-                    .frame(height: 16)
-                    .background(Color(uiColor: SolarizedDarkTheme.base01).opacity(0.4))
-
-                // Panes: Split V, Split H, Zoom, Close
-                HStack(spacing: 5) {
-                    Button(action: {
-                        resetInactivityTimer()
-                        triggerHapticFeedback()
-                        sessionManager.triggerTmuxSplitVertical()
-                    }) {
-                        Image(systemName: "rectangle.split.2x1")
-                            .font(.system(size: 11, weight: .medium))
-                            .frame(width: 28, height: 28)
-                            .background(Color(uiColor: SolarizedDarkTheme.base03))
-                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base0))
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
-                    }
-                    .buttonStyle(.plain)
-                    .hoverEffect(.highlight)
-                    .accessibilityLabel("Split pane vertically")
-
-                    Button(action: {
-                        resetInactivityTimer()
-                        triggerHapticFeedback()
-                        sessionManager.triggerTmuxSplitHorizontal()
-                    }) {
-                        Image(systemName: "rectangle.split.1x2")
-                            .font(.system(size: 11, weight: .medium))
-                            .frame(width: 28, height: 28)
-                            .background(Color(uiColor: SolarizedDarkTheme.base03))
-                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base0))
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
-                    }
-                    .buttonStyle(.plain)
-                    .hoverEffect(.highlight)
-                    .accessibilityLabel("Split pane horizontally")
-
-                    Button(action: {
-                        resetInactivityTimer()
-                        triggerHapticFeedback()
-                        sessionManager.triggerTmuxZoomPane()
-                    }) {
-                        Image(systemName: "arrow.up.left.and.arrow.down.right")
-                            .font(.system(size: 11, weight: .medium))
-                            .frame(width: 28, height: 28)
-                            .background(Color(uiColor: SolarizedDarkTheme.base03))
-                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.yellow))
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
-                    }
-                    .buttonStyle(.plain)
-                    .hoverEffect(.highlight)
-                    .accessibilityLabel("Toggle pane zoom")
-
-                    Button(action: {
-                        resetInactivityTimer()
-                        triggerHapticFeedback()
-                        sessionManager.triggerTmuxNextPane()
-                    }) {
-                        Image(systemName: "arrow.2.squarepath")
-                            .font(.system(size: 11, weight: .medium))
-                            .frame(width: 28, height: 28)
-                            .background(Color(uiColor: SolarizedDarkTheme.base03))
-                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
-                    }
-                    .buttonStyle(.plain)
-                    .hoverEffect(.highlight)
-                    .accessibilityLabel("Next tmux pane")
-
-                    Button(action: {
-                        resetInactivityTimer()
-                        triggerHapticFeedback()
-                        sessionManager.triggerTmuxLastPane()
-                    }) {
-                        Image(systemName: "arrow.left.arrow.right")
-                            .font(.system(size: 11, weight: .medium))
-                            .frame(width: 28, height: 28)
-                            .background(Color(uiColor: SolarizedDarkTheme.base03))
-                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
-                    }
-                    .buttonStyle(.plain)
-                    .hoverEffect(.highlight)
-                    .accessibilityLabel("Toggle last tmux pane")
-
-                    Button(action: {
-                        resetInactivityTimer()
-                        triggerHapticFeedback()
-                        sessionManager.triggerTmuxClosePane()
-                    }) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 11, weight: .medium))
-                            .frame(width: 28, height: 28)
-                            .background(Color(uiColor: SolarizedDarkTheme.base03))
-                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.red))
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
-                    }
-                    .buttonStyle(.plain)
-                    .hoverEffect(.highlight)
-                    .accessibilityLabel("Close tmux pane")
-                }
+    private var composingTools: some View {
+        HStack(spacing: 5) {
+            Button(action: {
+                resetInactivityTimer()
+                triggerHapticFeedback()
+                MultiWindowManager.shared.terminalContext(for: sessionManager).openSnippetLibrary()
+            }) {
+                Image(systemName: "text.badge.plus")
+                    .font(.system(size: 11, weight: .medium))
+                    .frame(width: controlButtonSize, height: controlButtonSize)
+                    .background(Color(uiColor: SolarizedDarkTheme.base03))
+                    .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base0))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 6)
+            .buttonStyle(.plain)
+            .hoverEffect(.highlight)
+            .accessibilityLabel("Snippets")
+
+            Button(action: {
+                resetInactivityTimer()
+                triggerHapticFeedback()
+                MultiWindowManager.shared.terminalContext(for: sessionManager).openComposer(origin: .statusActions)
+            }) {
+                Image(systemName: "square.and.pencil")
+                    .font(.system(size: 11, weight: .medium))
+                    .frame(width: controlButtonSize, height: controlButtonSize)
+                    .background(Color(uiColor: SolarizedDarkTheme.base03))
+                    .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base0))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+            .buttonStyle(.plain)
+            .hoverEffect(.highlight)
+            .accessibilityLabel("Compose command")
+        }
+    }
+
+    @ViewBuilder
+    private var tmuxControls: some View {
+        Divider()
+            .frame(height: 16)
+            .background(Color(uiColor: SolarizedDarkTheme.base01).opacity(0.4))
+
+        HStack(spacing: 4) {
+            Image(systemName: "macwindow.on.rectangle")
+                .font(.system(size: 11, weight: .bold))
+            Text("tmux")
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 5)
+        .background(Color(uiColor: SolarizedDarkTheme.violet).opacity(0.2))
+        .foregroundStyle(Color(uiColor: SolarizedDarkTheme.violet))
+        .clipShape(Capsule())
+
+        Divider()
+            .frame(height: 16)
+            .background(Color(uiColor: SolarizedDarkTheme.base01).opacity(0.4))
+
+        // Panes: Zoom, Split V, Split H, Join V, Join H, Mark, Next, Last, Break, Close
+        HStack(spacing: 5) {
+            Group {
+                Button(action: {
+                    resetInactivityTimer()
+                    triggerHapticFeedback()
+                    sessionManager.triggerTmuxZoomPane()
+                }) {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .font(.system(size: 11, weight: .medium))
+                        .frame(width: controlButtonSize, height: controlButtonSize)
+                        .background(Color(uiColor: SolarizedDarkTheme.base03))
+                        .foregroundStyle(Color(uiColor: SolarizedDarkTheme.yellow))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+                .buttonStyle(.plain)
+                .hoverEffect(.highlight)
+                .accessibilityLabel("Toggle pane zoom")
+
+                Button(action: {
+                    resetInactivityTimer()
+                    triggerHapticFeedback()
+                    sessionManager.triggerTmuxSplitVertical()
+                }) {
+                    Image(systemName: "rectangle.split.2x1")
+                        .font(.system(size: 11, weight: .medium))
+                        .frame(width: controlButtonSize, height: controlButtonSize)
+                        .background(Color(uiColor: SolarizedDarkTheme.base03))
+                        .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base0))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+                .buttonStyle(.plain)
+                .hoverEffect(.highlight)
+                .accessibilityLabel("Split pane vertically")
+
+                Button(action: {
+                    resetInactivityTimer()
+                    triggerHapticFeedback()
+                    sessionManager.triggerTmuxSplitHorizontal()
+                }) {
+                    Image(systemName: "rectangle.split.1x2")
+                        .font(.system(size: 11, weight: .medium))
+                        .frame(width: controlButtonSize, height: controlButtonSize)
+                        .background(Color(uiColor: SolarizedDarkTheme.base03))
+                        .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base0))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+                .buttonStyle(.plain)
+                .hoverEffect(.highlight)
+                .accessibilityLabel("Split pane horizontally")
+
+                Button(action: {
+                    resetInactivityTimer()
+                    triggerHapticFeedback()
+                    sessionManager.triggerTmuxJoinVertical()
+                }) {
+                    Image(systemName: "arrow.right.and.line.vertical.and.arrow.left")
+                        .font(.system(size: 11, weight: .medium))
+                        .frame(width: controlButtonSize, height: controlButtonSize)
+                        .background(Color(uiColor: SolarizedDarkTheme.base03))
+                        .foregroundStyle(Color(uiColor: SolarizedDarkTheme.orange))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+                .buttonStyle(.plain)
+                .hoverEffect(.highlight)
+                .accessibilityLabel("Join pane vertically")
+
+                Button(action: {
+                    resetInactivityTimer()
+                    triggerHapticFeedback()
+                    sessionManager.triggerTmuxJoinHorizontal()
+                }) {
+                    Image(systemName: "arrow.down.and.line.horizontal.and.arrow.up")
+                        .font(.system(size: 11, weight: .medium))
+                        .frame(width: controlButtonSize, height: controlButtonSize)
+                        .background(Color(uiColor: SolarizedDarkTheme.base03))
+                        .foregroundStyle(Color(uiColor: SolarizedDarkTheme.orange))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+                .buttonStyle(.plain)
+                .hoverEffect(.highlight)
+                .accessibilityLabel("Join pane horizontally")
+            }
+
+            Group {
+                Button(action: {
+                    resetInactivityTimer()
+                    triggerHapticFeedback()
+                    sessionManager.triggerTmuxMarkPane()
+                }) {
+                    Image(systemName: "pin")
+                        .font(.system(size: 11, weight: .medium))
+                        .frame(width: controlButtonSize, height: controlButtonSize)
+                        .background(Color(uiColor: SolarizedDarkTheme.base03))
+                        .foregroundStyle(Color(uiColor: SolarizedDarkTheme.orange))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+                .buttonStyle(.plain)
+                .hoverEffect(.highlight)
+                .accessibilityLabel("Mark tmux pane")
+
+                Button(action: {
+                    resetInactivityTimer()
+                    triggerHapticFeedback()
+                    sessionManager.triggerTmuxNextPane()
+                }) {
+                    Image(systemName: "arrow.2.squarepath")
+                        .font(.system(size: 11, weight: .medium))
+                        .frame(width: controlButtonSize, height: controlButtonSize)
+                        .background(Color(uiColor: SolarizedDarkTheme.base03))
+                        .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+                .buttonStyle(.plain)
+                .hoverEffect(.highlight)
+                .accessibilityLabel("Next tmux pane")
+
+                Button(action: {
+                    resetInactivityTimer()
+                    triggerHapticFeedback()
+                    sessionManager.triggerTmuxLastPane()
+                }) {
+                    Image(systemName: "arrow.left.arrow.right")
+                        .font(.system(size: 11, weight: .medium))
+                        .frame(width: controlButtonSize, height: controlButtonSize)
+                        .background(Color(uiColor: SolarizedDarkTheme.base03))
+                        .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+                .buttonStyle(.plain)
+                .hoverEffect(.highlight)
+                .accessibilityLabel("Toggle last tmux pane")
+
+                Button(action: {
+                    resetInactivityTimer()
+                    triggerHapticFeedback()
+                    sessionManager.triggerTmuxBreakPane()
+                }) {
+                    Image(systemName: "rectangle.portrait.and.arrow.right")
+                        .font(.system(size: 11, weight: .medium))
+                        .frame(width: controlButtonSize, height: controlButtonSize)
+                        .background(Color(uiColor: SolarizedDarkTheme.base03))
+                        .foregroundStyle(Color(uiColor: SolarizedDarkTheme.violet))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+                .buttonStyle(.plain)
+                .hoverEffect(.highlight)
+                .accessibilityLabel("Break pane into a new window")
+
+                Button(action: {
+                    resetInactivityTimer()
+                    triggerHapticFeedback()
+                    sessionManager.triggerTmuxClosePane()
+                }) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .medium))
+                        .frame(width: controlButtonSize, height: controlButtonSize)
+                        .background(Color(uiColor: SolarizedDarkTheme.base03))
+                        .foregroundStyle(Color(uiColor: SolarizedDarkTheme.red))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+                .buttonStyle(.plain)
+                .hoverEffect(.highlight)
+                .accessibilityLabel("Close tmux pane")
+            }
+        }
+
+        Divider()
+            .frame(height: 16)
+            .background(Color(uiColor: SolarizedDarkTheme.base01).opacity(0.4))
+
+        // Window numbers 0..9
+        HStack(spacing: 5) {
+            ForEach(0...9, id: \.self) { num in
+                Button(action: {
+                    resetInactivityTimer()
+                    triggerHapticFeedback()
+                    sessionManager.triggerTmuxWindowNumber(num)
+                }) {
+                    Text("\(num)")
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .frame(width: controlButtonSize, height: controlButtonSize)
+                        .background(Color(uiColor: SolarizedDarkTheme.base03))
+                        .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base1))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+                .buttonStyle(.plain)
+                .hoverEffect(.highlight)
+                .accessibilityLabel("Switch to tmux window \(num)")
+            }
+        }
+
+        Divider()
+            .frame(height: 16)
+            .background(Color(uiColor: SolarizedDarkTheme.base01).opacity(0.4))
+
+        // Navigation: Prev / Next / New / Rename
+        HStack(spacing: 5) {
+            Button(action: {
+                resetInactivityTimer()
+                triggerHapticFeedback()
+                sessionManager.triggerTmuxPrevWindow()
+            }) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 11, weight: .semibold))
+                    .frame(width: controlButtonSize, height: controlButtonSize)
+                    .background(Color(uiColor: SolarizedDarkTheme.base03))
+                    .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base0))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+            .buttonStyle(.plain)
+            .hoverEffect(.highlight)
+            .accessibilityLabel("Previous tmux window")
+
+            Button(action: {
+                resetInactivityTimer()
+                triggerHapticFeedback()
+                sessionManager.triggerTmuxNextWindow()
+            }) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .frame(width: controlButtonSize, height: controlButtonSize)
+                    .background(Color(uiColor: SolarizedDarkTheme.base03))
+                    .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base0))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+            .buttonStyle(.plain)
+            .hoverEffect(.highlight)
+            .accessibilityLabel("Next tmux window")
+
+            Button(action: {
+                resetInactivityTimer()
+                triggerHapticFeedback()
+                sessionManager.triggerTmuxNewWindow()
+            }) {
+                Image(systemName: "plus")
+                    .font(.system(size: 11, weight: .semibold))
+                    .frame(width: controlButtonSize, height: controlButtonSize)
+                    .background(Color(uiColor: SolarizedDarkTheme.base03))
+                    .foregroundStyle(Color(uiColor: SolarizedDarkTheme.green))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+            .buttonStyle(.plain)
+            .hoverEffect(.highlight)
+            .accessibilityLabel("New tmux window")
+
+            Button(action: {
+                resetInactivityTimer()
+                triggerHapticFeedback()
+                sessionManager.triggerTmuxRenameWindow()
+            }) {
+                Image(systemName: "pencil.line")
+                    .font(.system(size: 11, weight: .semibold))
+                    .frame(width: controlButtonSize, height: controlButtonSize)
+                    .background(Color(uiColor: SolarizedDarkTheme.base03))
+                    .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+            .buttonStyle(.plain)
+            .hoverEffect(.highlight)
+            .accessibilityLabel("Rename tmux window")
+        }
+    }
+
+    private var terminalControlBar: some View {
+        HStack(spacing: 0) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    composingTools
+
+                    if sessionManager.activeHost?.autoConnectTmux ?? false {
+                        tmuxControls
+                    }
+
+                    if UIDevice.current.userInterfaceIdiom != .pad {
+                        Group {
+                            Divider()
+                                .frame(height: 16)
+                                .background(Color(uiColor: SolarizedDarkTheme.base01).opacity(0.4))
+
+                            helpButton
+                        }
+                    }
+                }
+                .padding(.leading, 16)
+                .padding(.trailing, UIDevice.current.userInterfaceIdiom == .pad ? 8 : 16)
+                .padding(.vertical, 6)
+            }
+
+            if UIDevice.current.userInterfaceIdiom == .pad {
+                HStack(spacing: 8) {
+                    Divider()
+                        .frame(height: 16)
+                        .background(Color(uiColor: SolarizedDarkTheme.base01).opacity(0.4))
+
+                    helpButton
+                }
+                .padding(.trailing, 16)
+                .padding(.vertical, 6)
+            }
         }
         .background(Color(uiColor: SolarizedDarkTheme.base03).opacity(0.6))
+    }
+
+    private var tmuxControlBar: some View {
+        terminalControlBar
+    }
+
+    private var helpButton: some View {
+        Button(action: {
+            cancelInactivityTimer()
+            triggerHapticFeedback()
+            showingControlHelp = true
+        }) {
+            Image(systemName: "questionmark.circle")
+                .font(.system(size: 11, weight: .medium))
+                .frame(width: controlButtonSize, height: controlButtonSize)
+                .background(Color(uiColor: SolarizedDarkTheme.base03))
+                .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base0))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+        }
+        .buttonStyle(.plain)
+        .hoverEffect(.highlight)
+        .accessibilityLabel("What these controls do")
+    }
+
+    /// 44pt is the smallest comfortable touch target for finger tapping on both iPhone and iPad.
+    private var controlButtonSize: CGFloat {
+        44
     }
 
     private func triggerHapticFeedback() {
@@ -615,6 +804,15 @@ public struct StatusOverlayView: View {
         cancelInactivityTimer()
         withAnimation(dynamicSpringAnimation) {
             isExpanded = false
+        }
+    }
+
+    /// The help sheet keeps the bar open behind it; closing it restarts the timer.
+    private func presentControlHelp(_ isPresented: Bool) {
+        if isPresented {
+            cancelInactivityTimer()
+        } else {
+            resetInactivityTimer()
         }
     }
 
@@ -746,6 +944,24 @@ public struct StatusOverlayView: View {
                         }
                     }
                     .padding(.vertical, 4)
+                }
+
+                if let err = sessionManager.lastError, err.contains("regenerated") {
+                    Section(header: Text("⚠️ Key Warning")) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("The configured SSH key could not be retrieved from secure storage or appears invalid.")
+                                .font(.caption)
+                                .foregroundStyle(Color(uiColor: SolarizedDarkTheme.yellow))
+                            Text("This may happen if the key was not transferred during a device migration or was removed from Keychain.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text("Recommended Fix:")
+                                .font(.caption.bold())
+                            Text("Open Settings → SSH Keys to generate or import a new key, and update your host to use it.")
+                                .font(.caption)
+                        }
+                        .padding(.vertical, 4)
+                    }
                 }
 
                 if let auth = sessionManager.lastAttemptedAuth, auth.rawKeyType == "ssh-rsa" || auth.keyType == "RSA" {

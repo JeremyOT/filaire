@@ -1,5 +1,6 @@
 import UIKit
 import SwiftTerm
+import GameController
 
 public enum SceneFocusIntent: Equatable, Sendable {
     case terminal
@@ -7,6 +8,9 @@ public enum SceneFocusIntent: Equatable, Sendable {
     case securityPrompt
     case preview
     case modalPresentation
+    /// A local editor in this scene (command composer or snippets) owns the keyboard; the terminal must not
+    /// take first responder back while it is up.
+    case localEditor
     case none
 }
 
@@ -21,6 +25,11 @@ open class FilaireTerminalView: TerminalView, FilaireAccessoryDelegate, UIGestur
     public private(set) var customAccessoryView: FilaireAccessoryView?
     public weak var focusGate: (any FilaireFocusGate)?
     public var onInteraction: (() -> Void)?
+    /// Set by the owning terminal context, so a composer request reaches that context's scene only.
+    public var onComposerRequested: (() -> Void)?
+    /// Same routing for the snippet library: one scene's shortcut opens only that scene's library.
+    public var onSnippetsRequested: (() -> Void)?
+
     public var focusIntent: SceneFocusIntent = .terminal
     private var focusGeneration: Int = 0
 
@@ -131,6 +140,7 @@ open class FilaireTerminalView: TerminalView, FilaireAccessoryDelegate, UIGestur
     deinit {
         stopModifierKeyRepeat()
         removeWindowObservers()
+        removeKeyboardAccessoryObservers()
         if let observer = terminalSettingsObserver {
             NotificationCenter.default.removeObserver(observer)
         }
@@ -312,7 +322,8 @@ open class FilaireTerminalView: TerminalView, FilaireAccessoryDelegate, UIGestur
         // Explicitly enable mouse reporting for tmux (set -g mouse on)
         self.allowMouseReporting = true
 
-        // Setup custom input accessory view according to settings
+        // Setup keyboard accessory observers and configure bar according to settings & hardware state
+        setupKeyboardAccessoryObservers()
         applyAccessoryBarSetting()
 
         terminalSettingsObserver = NotificationCenter.default.addObserver(
@@ -333,34 +344,176 @@ open class FilaireTerminalView: TerminalView, FilaireAccessoryDelegate, UIGestur
         setupCustomPointerInteraction()
     }
 
-    public func applyAccessoryBarSetting() {
-        if TerminalSettings.shared.showKeyboardAccessoryBar {
-            if self.customAccessoryView == nil {
-                let accessory = FilaireAccessoryView(
-                    frame: CGRect(x: 0, y: 0, width: bounds.width, height: 38),
-                    delegate: self
-                )
-                accessory.configureTmux(
-                    enabled: autoConnectTmux,
-                    prefixTitle: tmuxPrefixTitle,
-                    prefixByte: tmuxPrefixByte
-                )
-                self.customAccessoryView = accessory
-            }
-            if self.inputAccessoryView !== self.customAccessoryView {
-                self.inputAccessoryView = self.customAccessoryView
-                if isFirstResponder {
-                    reloadInputViews()
-                }
-            }
-        } else {
+    /// Matches `FilaireAccessoryView.intrinsicContentSize` (44pt).
+    private var accessoryBarHeight: CGFloat {
+        44
+    }
+
+    internal var isHardwareKeyboardConnectedOverride: Bool?
+    internal var isOnScreenKeyboardDisplayedOverride: Bool?
+
+    private var hasReceivedPhysicalKeyPress: Bool = false
+    private var isOnScreenKeyboardDisplayed: Bool = false
+    private var keyboardAccessoryObservers: [NSObjectProtocol] = []
+
+    public var isHardwareKeyboardConnected: Bool {
+        if let override = isHardwareKeyboardConnectedOverride {
+            return override
+        }
+        #if targetEnvironment(macCatalyst)
+        return true
+        #else
+        guard UIDevice.current.userInterfaceIdiom == .pad else {
+            return false
+        }
+        if hasReceivedPhysicalKeyPress {
+            return true
+        }
+        if GCKeyboard.coalesced != nil {
+            return true
+        }
+        if let ctx = UITextInputContext.current(), ctx.isHardwareKeyboardInputExpected {
+            return true
+        }
+        return false
+        #endif
+    }
+
+    public var isSoftwareKeyboardVisible: Bool {
+        if let override = isOnScreenKeyboardDisplayedOverride {
+            return override
+        }
+        return isOnScreenKeyboardDisplayed
+    }
+
+    public var shouldShowAccessoryBar: Bool {
+        guard TerminalSettings.shared.showKeyboardAccessoryBar else {
+            return false
+        }
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            return true
+        }
+        // On iPad: when a hardware keyboard (e.g. Magic Keyboard) is active,
+        // show the toolbar only when the on-screen keyboard is currently displayed.
+        if isHardwareKeyboardConnected {
+            return isSoftwareKeyboardVisible
+        }
+        return true
+    }
+
+    private func removeKeyboardAccessoryObservers() {
+        for observer in keyboardAccessoryObservers {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        keyboardAccessoryObservers.removeAll()
+    }
+
+    private func setupKeyboardAccessoryObservers() {
+        removeKeyboardAccessoryObservers()
+
+        let frameObserver = NotificationCenter.default.addObserver(
+            forName: UIResponder.keyboardWillChangeFrameNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            self?.handleKeyboardFrameChange(notification)
+        }
+        keyboardAccessoryObservers.append(frameObserver)
+
+        let hideObserver = NotificationCenter.default.addObserver(
+            forName: UIResponder.keyboardWillHideNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            self?.handleKeyboardWillHide(notification)
+        }
+        keyboardAccessoryObservers.append(hideObserver)
+
+        let connectObserver = NotificationCenter.default.addObserver(
+            forName: .GCKeyboardDidConnect,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.updateAccessoryBarVisibility()
+        }
+        keyboardAccessoryObservers.append(connectObserver)
+
+        let disconnectObserver = NotificationCenter.default.addObserver(
+            forName: .GCKeyboardDidDisconnect,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.hasReceivedPhysicalKeyPress = false
+            self?.updateAccessoryBarVisibility()
+        }
+        keyboardAccessoryObservers.append(disconnectObserver)
+    }
+
+    private func handleKeyboardFrameChange(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let endFrame = (userInfo[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue else {
+            return
+        }
+
+        let screenHeight = window?.windowScene?.screen.bounds.height ?? UIScreen.main.bounds.height
+        // An on-screen keyboard has a substantial height (>= 100pt) and its frame is on-screen.
+        // A hardware keyboard without an on-screen keyboard has height 0 or is off-screen,
+        // or if only an accessory bar is present, its height is <= 60pt.
+        let isShowingOnScreen = endFrame.origin.y < screenHeight && endFrame.height > 100
+
+        if self.isOnScreenKeyboardDisplayed != isShowingOnScreen {
+            self.isOnScreenKeyboardDisplayed = isShowingOnScreen
+            updateAccessoryBarVisibility()
+        }
+    }
+
+    private func handleKeyboardWillHide(_ notification: Notification) {
+        if self.isOnScreenKeyboardDisplayed {
+            self.isOnScreenKeyboardDisplayed = false
+            updateAccessoryBarVisibility()
+        }
+    }
+
+    public func updateAccessoryBarVisibility() {
+        #if !os(visionOS)
+        inputAssistantItem.leadingBarButtonGroups = []
+        inputAssistantItem.trailingBarButtonGroups = []
+        #endif
+
+        guard TerminalSettings.shared.showKeyboardAccessoryBar else {
             if self.inputAccessoryView != nil {
                 self.inputAccessoryView = nil
                 if isFirstResponder {
                     reloadInputViews()
                 }
             }
+            return
         }
+
+        if self.customAccessoryView == nil {
+            let accessory = FilaireAccessoryView(
+                frame: CGRect(x: 0, y: 0, width: bounds.width, height: accessoryBarHeight),
+                delegate: self
+            )
+            accessory.configureTmux(
+                enabled: autoConnectTmux,
+                prefixTitle: tmuxPrefixTitle,
+                prefixByte: tmuxPrefixByte
+            )
+            self.customAccessoryView = accessory
+        }
+
+        let desiredAccessory: UIView? = shouldShowAccessoryBar ? self.customAccessoryView : nil
+        if self.inputAccessoryView !== desiredAccessory {
+            self.inputAccessoryView = desiredAccessory
+            if isFirstResponder {
+                reloadInputViews()
+            }
+        }
+    }
+
+    public func applyAccessoryBarSetting() {
+        updateAccessoryBarVisibility()
     }
 
     func isMouseOrSelectionPanGesture(_ gesture: UIGestureRecognizer) -> Bool {
@@ -606,11 +759,15 @@ open class FilaireTerminalView: TerminalView, FilaireAccessoryDelegate, UIGestur
              #selector(handleTmuxNumberShortcut(_:)),
              #selector(handleTmuxNewWindow(_:)),
              #selector(handleTmuxClosePane(_:)),
+             #selector(handleTmuxBreakPane(_:)),
              #selector(handleTmuxRenameWindow(_:)),
              #selector(handleTmuxNextWindow(_:)),
              #selector(handleTmuxPrevWindow(_:)),
              #selector(handleTmuxSplitVertical(_:)),
              #selector(handleTmuxSplitHorizontal(_:)),
+             #selector(handleTmuxJoinVertical(_:)),
+             #selector(handleTmuxJoinHorizontal(_:)),
+             #selector(handleTmuxMarkPane(_:)),
              #selector(handleTmuxSelectPaneUp(_:)),
              #selector(handleTmuxSelectPaneDown(_:)),
              #selector(handleTmuxSelectPaneLeft(_:)),
@@ -622,6 +779,8 @@ open class FilaireTerminalView: TerminalView, FilaireAccessoryDelegate, UIGestur
              #selector(handlePaste(_:)),
              #selector(handlePasteCommand(_:)),
              #selector(handleOpenSettingsShortcut(_:)),
+             #selector(handleOpenComposer(_:)),
+             #selector(handleOpenSnippets(_:)),
              #selector(handleNewWindowShortcut(_:)),
              #selector(handleCloseWindowShortcut(_:)),
              #selector(handleZoomInCommand(_:)),
@@ -669,6 +828,10 @@ open class FilaireTerminalView: TerminalView, FilaireAccessoryDelegate, UIGestur
     }
 
     open override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        if !hasReceivedPhysicalKeyPress && presses.contains(where: { $0.key != nil }) {
+            hasReceivedPhysicalKeyPress = true
+            updateAccessoryBarVisibility()
+        }
         // Stop repeat if a *different* key is pressed (not the currently repeating key or Option modifier)
         if let activeCode = activeRepeatKeyCode {
             for press in presses {
@@ -868,6 +1031,16 @@ open class FilaireTerminalView: TerminalView, FilaireAccessoryDelegate, UIGestur
                 return triggerTmuxSplitVertical()
             }
 
+            // Cmd+J: Join vertically
+            if lowercasedIgnoring == "j" || keyCode == .keyboardJ {
+                return triggerTmuxJoinVertical()
+            }
+
+            // Cmd+M: Mark pane
+            if lowercasedIgnoring == "m" || keyCode == .keyboardM {
+                return triggerTmuxMarkPane()
+            }
+
             // Cmd+K: Clear screen
             if lowercasedIgnoring == "k" || keyCode == .keyboardK {
                 return triggerClearScreen()
@@ -911,6 +1084,11 @@ open class FilaireTerminalView: TerminalView, FilaireAccessoryDelegate, UIGestur
                 return triggerTmuxSplitHorizontal()
             }
 
+            // Cmd+Shift+J: Join horizontally
+            if lowercasedIgnoring == "j" || keyCode == .keyboardJ {
+                return triggerTmuxJoinHorizontal()
+            }
+
             // Cmd+Shift+N: New Window
             if lowercasedIgnoring == "n" || keyCode == .keyboardN {
                 return triggerOpenNewWindow()
@@ -924,6 +1102,21 @@ open class FilaireTerminalView: TerminalView, FilaireAccessoryDelegate, UIGestur
             // Cmd+Shift+R: Rename tmux window
             if (lowercasedIgnoring == "r" || keyCode == .keyboardR) && autoConnectTmux {
                 return triggerTmuxRenameWindow()
+            }
+
+            // Cmd+Shift+B: Break the current pane into its own tmux window
+            if (lowercasedIgnoring == "b" || keyCode == .keyboardB) && autoConnectTmux {
+                return triggerTmuxBreakPane()
+            }
+
+            // Cmd+Shift+E: Open the command composer
+            if lowercasedIgnoring == "e" || keyCode == .keyboardE {
+                return triggerOpenComposer()
+            }
+
+            // Cmd+Shift+S: Open the snippet library
+            if lowercasedIgnoring == "s" || keyCode == .keyboardS {
+                return triggerOpenSnippets()
             }
         }
 
@@ -1086,6 +1279,28 @@ open class FilaireTerminalView: TerminalView, FilaireAccessoryDelegate, UIGestur
             cmdShiftDLower.wantsPriorityOverSystemBehavior = true
             commands.append(cmdShiftDLower)
 
+            let cmdM = UIKeyCommand(input: "m", modifierFlags: .command, action: #selector(handleTmuxMarkPane(_:)))
+            cmdM.title = "Mark Pane"
+            cmdM.discoverabilityTitle = "Mark Pane"
+            cmdM.wantsPriorityOverSystemBehavior = true
+            commands.append(cmdM)
+
+            let cmdJ = UIKeyCommand(input: "j", modifierFlags: .command, action: #selector(handleTmuxJoinVertical(_:)))
+            cmdJ.title = "Join Pane Vertically"
+            cmdJ.discoverabilityTitle = "Join Pane Vertically"
+            cmdJ.wantsPriorityOverSystemBehavior = true
+            commands.append(cmdJ)
+
+            let cmdShiftJ = UIKeyCommand(input: "J", modifierFlags: [.command, .shift], action: #selector(handleTmuxJoinHorizontal(_:)))
+            cmdShiftJ.title = "Join Pane Horizontally"
+            cmdShiftJ.discoverabilityTitle = "Join Pane Horizontally"
+            cmdShiftJ.wantsPriorityOverSystemBehavior = true
+            commands.append(cmdShiftJ)
+
+            let cmdShiftJLower = UIKeyCommand(input: "j", modifierFlags: [.command, .shift], action: #selector(handleTmuxJoinHorizontal(_:)))
+            cmdShiftJLower.wantsPriorityOverSystemBehavior = true
+            commands.append(cmdShiftJLower)
+
             let cmdShiftR = UIKeyCommand(input: "R", modifierFlags: [.command, .shift], action: #selector(handleTmuxRenameWindow(_:)))
             cmdShiftR.title = "Rename Tmux Window"
             cmdShiftR.discoverabilityTitle = "Rename Tmux Window"
@@ -1095,6 +1310,16 @@ open class FilaireTerminalView: TerminalView, FilaireAccessoryDelegate, UIGestur
             let cmdShiftRLower = UIKeyCommand(input: "r", modifierFlags: [.command, .shift], action: #selector(handleTmuxRenameWindow(_:)))
             cmdShiftRLower.wantsPriorityOverSystemBehavior = true
             commands.append(cmdShiftRLower)
+
+            let cmdShiftB = UIKeyCommand(input: "B", modifierFlags: [.command, .shift], action: #selector(handleTmuxBreakPane(_:)))
+            cmdShiftB.title = "Break Pane Into Window"
+            cmdShiftB.discoverabilityTitle = "Break Pane Into Window"
+            cmdShiftB.wantsPriorityOverSystemBehavior = true
+            commands.append(cmdShiftB)
+
+            let cmdShiftBLower = UIKeyCommand(input: "b", modifierFlags: [.command, .shift], action: #selector(handleTmuxBreakPane(_:)))
+            cmdShiftBLower.wantsPriorityOverSystemBehavior = true
+            commands.append(cmdShiftBLower)
 
             // Tmux Pane Navigation Shortcuts:
             let cmdOptUp = UIKeyCommand(
@@ -1223,6 +1448,42 @@ open class FilaireTerminalView: TerminalView, FilaireAccessoryDelegate, UIGestur
         cmdShiftWLower.wantsPriorityOverSystemBehavior = true
         commands.append(cmdShiftWLower)
 
+        let cmdShiftE = UIKeyCommand(
+            input: "E",
+            modifierFlags: [.command, .shift],
+            action: #selector(handleOpenComposer(_:))
+        )
+        cmdShiftE.title = "Compose Command"
+        cmdShiftE.discoverabilityTitle = "Compose Command"
+        cmdShiftE.wantsPriorityOverSystemBehavior = true
+        commands.append(cmdShiftE)
+
+        let cmdShiftELower = UIKeyCommand(
+            input: "e",
+            modifierFlags: [.command, .shift],
+            action: #selector(handleOpenComposer(_:))
+        )
+        cmdShiftELower.wantsPriorityOverSystemBehavior = true
+        commands.append(cmdShiftELower)
+
+        let cmdShiftS = UIKeyCommand(
+            input: "S",
+            modifierFlags: [.command, .shift],
+            action: #selector(handleOpenSnippets(_:))
+        )
+        cmdShiftS.title = "Snippets"
+        cmdShiftS.discoverabilityTitle = "Snippets"
+        cmdShiftS.wantsPriorityOverSystemBehavior = true
+        commands.append(cmdShiftS)
+
+        let cmdShiftSLower = UIKeyCommand(
+            input: "s",
+            modifierFlags: [.command, .shift],
+            action: #selector(handleOpenSnippets(_:))
+        )
+        cmdShiftSLower.wantsPriorityOverSystemBehavior = true
+        commands.append(cmdShiftSLower)
+
         // 4. Font Zoom Shortcuts (Cmd +, Cmd =, Cmd -, Cmd 0)
         let cmdPlus = UIKeyCommand(input: "+", modifierFlags: .command, action: #selector(handleZoomInCommand(_:)))
         cmdPlus.title = "Zoom In"
@@ -1308,6 +1569,16 @@ open class FilaireTerminalView: TerminalView, FilaireAccessoryDelegate, UIGestur
         return true
     }
 
+    /// tmux break-pane: moves the current pane into a window of its own, which is far easier to work with
+    /// than a split on a phone-sized screen.
+    @discardableResult
+    public func triggerTmuxBreakPane() -> Bool {
+        guard autoConnectTmux else { return false }
+        guard shouldExecuteShortcut(id: "breakPane") else { return true }
+        send([tmuxPrefixByte, UInt8(ascii: "!")])
+        return true
+    }
+
     @discardableResult
     public func triggerTmuxRenameWindow() -> Bool {
         guard autoConnectTmux else { return false }
@@ -1347,6 +1618,32 @@ open class FilaireTerminalView: TerminalView, FilaireAccessoryDelegate, UIGestur
         guard shouldExecuteShortcut(id: "splitHoriz") else { return true }
         // Bound to split-window -v -c "#{pane_current_path}" by HostProfile.tmuxStartupCommand
         send(Array("\u{1b}[9991~".utf8))
+        return true
+    }
+
+    @discardableResult
+    public func triggerTmuxJoinVertical() -> Bool {
+        guard autoConnectTmux else { return false }
+        guard shouldExecuteShortcut(id: "joinVert") else { return true }
+        // Bound to join-pane -h by HostProfile.tmuxStartupCommand
+        send(Array("\u{1b}[9992~".utf8))
+        return true
+    }
+
+    @discardableResult
+    public func triggerTmuxJoinHorizontal() -> Bool {
+        guard autoConnectTmux else { return false }
+        guard shouldExecuteShortcut(id: "joinHoriz") else { return true }
+        // Bound to join-pane -v by HostProfile.tmuxStartupCommand
+        send(Array("\u{1b}[9993~".utf8))
+        return true
+    }
+
+    @discardableResult
+    public func triggerTmuxMarkPane() -> Bool {
+        guard autoConnectTmux else { return false }
+        guard shouldExecuteShortcut(id: "markPane") else { return true }
+        send([tmuxPrefixByte, UInt8(ascii: "m")])
         return true
     }
 
@@ -1457,6 +1754,23 @@ open class FilaireTerminalView: TerminalView, FilaireAccessoryDelegate, UIGestur
         return true
     }
 
+    /// Asks this view's owning context to present the command composer. Routed through a callback rather than
+    /// a broadcast, so only the originating scene opens an editor.
+    @discardableResult
+    public func triggerOpenComposer() -> Bool {
+        guard shouldExecuteShortcut(id: "openComposer") else { return true }
+        onComposerRequested?()
+        return true
+    }
+
+    /// Asks this view's owning context to present the snippet library.
+    @discardableResult
+    public func triggerOpenSnippets() -> Bool {
+        guard shouldExecuteShortcut(id: "openSnippets") else { return true }
+        onSnippetsRequested?()
+        return true
+    }
+
     @discardableResult
     public func triggerOpenNewWindow() -> Bool {
         NotificationCenter.default.post(name: .openNewWindowRequested, object: self.window)
@@ -1543,12 +1857,36 @@ open class FilaireTerminalView: TerminalView, FilaireAccessoryDelegate, UIGestur
         _ = triggerTmuxPrevWindow()
     }
 
+    @objc open func handleOpenComposer(_ sender: Any?) {
+        _ = triggerOpenComposer()
+    }
+
+    @objc open func handleOpenSnippets(_ sender: Any?) {
+        _ = triggerOpenSnippets()
+    }
+
+    @objc open func handleTmuxBreakPane(_ sender: Any?) {
+        _ = triggerTmuxBreakPane()
+    }
+
     @objc open func handleTmuxSplitVertical(_ sender: Any?) {
         _ = triggerTmuxSplitVertical()
     }
 
     @objc open func handleTmuxSplitHorizontal(_ sender: Any?) {
         _ = triggerTmuxSplitHorizontal()
+    }
+
+    @objc open func handleTmuxJoinVertical(_ sender: Any?) {
+        _ = triggerTmuxJoinVertical()
+    }
+
+    @objc open func handleTmuxJoinHorizontal(_ sender: Any?) {
+        _ = triggerTmuxJoinHorizontal()
+    }
+
+    @objc open func handleTmuxMarkPane(_ sender: Any?) {
+        _ = triggerTmuxMarkPane()
     }
 
     @objc open func handleTmuxSelectPaneUp(_ sender: Any?) {
@@ -1823,6 +2161,14 @@ open class FilaireTerminalView: TerminalView, FilaireAccessoryDelegate, UIGestur
 
     public func accessoryDidRequestPaste() {
         _ = triggerPaste()
+    }
+
+    public func accessoryDidRequestComposer() {
+        _ = triggerOpenComposer()
+    }
+
+    public func accessoryDidRequestSnippets() {
+        _ = triggerOpenSnippets()
     }
 
     // MARK: - URL Tap & Pane Wrap Expansion
@@ -2154,6 +2500,7 @@ open class FilaireTerminalView: TerminalView, FilaireAccessoryDelegate, UIGestur
         #if DEBUG
         if CommandLine.arguments.contains("--demo") { return false }
         #endif
+        updateAccessoryBarVisibility()
         let result = super.becomeFirstResponder()
         if result {
             self.focusIntent = .terminal
