@@ -10,6 +10,7 @@ public struct StatusOverlayView: View {
     public let onOpenSettings: () -> Void
     @ObservedObject public var windowManager: MultiWindowManager
 
+    @Environment(\.terminalTheme) private var theme
     @State private var showingDiagnosticSheet: Bool = false
     @State private var showingControlHelp: Bool = false
     @State private var copiedFeedback: String? = nil
@@ -107,7 +108,7 @@ public struct StatusOverlayView: View {
                 Button {
                     expand()
                 } label: {
-                    Color(uiColor: SolarizedDarkTheme.base03).opacity(0.02)
+                    Color(uiColor: theme.surfaceBackground).opacity(0.02)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .contentShape(Rectangle())
                 }
@@ -124,14 +125,14 @@ public struct StatusOverlayView: View {
 
                             Text(hostName)
                                 .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                                .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base1))
+                                .foregroundStyle(Color(uiColor: theme.primaryText))
                                 .lineLimit(1)
                                 .fixedSize()
 
                             if !userName.isEmpty && UIDevice.current.userInterfaceIdiom != .phone {
                                 Text(userName)
                                     .font(.system(size: 12, weight: .regular, design: .monospaced))
-                                    .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base00))
+                                    .foregroundStyle(Color(uiColor: theme.secondaryText))
                                     .lineLimit(1)
                             }
                         }
@@ -145,7 +146,7 @@ public struct StatusOverlayView: View {
                     } label: {
                         Image(systemName: "gearshape.fill")
                             .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base0))
+                            .foregroundStyle(Color(uiColor: theme.tertiaryText))
                             .padding(.horizontal, 4)
                             .padding(.vertical, 2)
                             .contentShape(Rectangle())
@@ -157,14 +158,14 @@ public struct StatusOverlayView: View {
                 .padding(.vertical, 3)
                 .background(
                     Capsule()
-                        .fill(Color(uiColor: SolarizedDarkTheme.base02).opacity(0.9))
+                        .fill(Color(uiColor: theme.secondarySurface).opacity(0.9))
                 )
 
                 // Right margin tap area to expand
                 Button {
                     expand()
                 } label: {
-                    Color(uiColor: SolarizedDarkTheme.base03).opacity(0.02)
+                    Color(uiColor: theme.surfaceBackground).opacity(0.02)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .contentShape(Rectangle())
                 }
@@ -179,11 +180,11 @@ public struct StatusOverlayView: View {
                 ZStack {
                     // Hit-testable backdrop (alpha >= 0.15 so UIKit hitTest never skips it)
                     Rectangle()
-                        .fill(Color(uiColor: SolarizedDarkTheme.base03).opacity(0.15))
+                        .fill(Color(uiColor: theme.surfaceBackground).opacity(0.15))
 
                     // Subtle visual grab handle indicating the interactive pull-down bar
                     Capsule()
-                        .fill(Color(uiColor: SolarizedDarkTheme.base01).opacity(0.55))
+                        .fill(Color(uiColor: theme.separator).opacity(0.55))
                         .frame(width: 36, height: 4)
                 }
                 .frame(maxWidth: .infinity)
@@ -227,8 +228,8 @@ public struct StatusOverlayView: View {
                         }
                         .padding(.horizontal, UIDevice.current.userInterfaceIdiom == .phone ? 8 : 10)
                         .padding(.vertical, 5)
-                        .background(Color(uiColor: SolarizedDarkTheme.red.withAlphaComponent(0.2)))
-                        .foregroundStyle(Color(uiColor: SolarizedDarkTheme.red))
+                        .background(Color(uiColor: theme.error.withAlphaComponent(0.2)))
+                        .foregroundStyle(Color(uiColor: theme.error))
                         .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)
@@ -251,8 +252,8 @@ public struct StatusOverlayView: View {
                         }
                         .padding(.horizontal, UIDevice.current.userInterfaceIdiom == .phone ? 8 : 10)
                         .padding(.vertical, 5)
-                        .background(Color(uiColor: SolarizedDarkTheme.cyan.withAlphaComponent(0.2)))
-                        .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
+                        .background(Color(uiColor: theme.accent.withAlphaComponent(0.2)))
+                        .foregroundStyle(Color(uiColor: theme.accent))
                         .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)
@@ -321,8 +322,8 @@ public struct StatusOverlayView: View {
                         }
                         .padding(.horizontal, UIDevice.current.userInterfaceIdiom == .phone ? 8 : 10)
                         .padding(.vertical, 5)
-                        .background(Color(uiColor: SolarizedDarkTheme.base03))
-                        .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
+                        .background(Color(uiColor: theme.surfaceBackground))
+                        .foregroundStyle(Color(uiColor: theme.accent))
                         .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)
@@ -344,8 +345,8 @@ public struct StatusOverlayView: View {
                     }
                     .padding(.horizontal, UIDevice.current.userInterfaceIdiom == .phone ? 8 : 10)
                     .padding(.vertical, 5)
-                    .background(Color(uiColor: SolarizedDarkTheme.base03))
-                    .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base1))
+                    .background(Color(uiColor: theme.surfaceBackground))
+                    .foregroundStyle(Color(uiColor: theme.primaryText))
                     .clipShape(Capsule())
                 }
                 .buttonStyle(.plain)
@@ -357,9 +358,9 @@ public struct StatusOverlayView: View {
                 } label: {
                     Image(systemName: "chevron.up")
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base0))
+                        .foregroundStyle(Color(uiColor: theme.tertiaryText))
                         .padding(6)
-                        .background(Color(uiColor: SolarizedDarkTheme.base03))
+                        .background(Color(uiColor: theme.surfaceBackground))
                         .clipShape(Circle())
                 }
                 .buttonStyle(.plain)
@@ -375,13 +376,13 @@ public struct StatusOverlayView: View {
             }
         }
         .background(
-            Color(uiColor: SolarizedDarkTheme.base02)
+            Color(uiColor: theme.secondarySurface)
                 .opacity(0.96)
         )
         .overlay(
             Rectangle()
                 .frame(height: 0.5)
-                .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base01).opacity(0.3)),
+                .foregroundStyle(Color(uiColor: theme.separator).opacity(0.3)),
             alignment: .bottom
         )
         .shadow(color: Color.black.opacity(0.35), radius: 6, x: 0, y: 3)
@@ -408,8 +409,8 @@ public struct StatusOverlayView: View {
                 Image(systemName: "text.badge.plus")
                     .font(.system(size: 11, weight: .medium))
                     .frame(width: controlButtonSize, height: controlButtonSize)
-                    .background(Color(uiColor: SolarizedDarkTheme.base03))
-                    .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base0))
+                    .background(Color(uiColor: theme.surfaceBackground))
+                    .foregroundStyle(Color(uiColor: theme.tertiaryText))
                     .clipShape(RoundedRectangle(cornerRadius: 6))
             }
             .buttonStyle(.plain)
@@ -424,8 +425,8 @@ public struct StatusOverlayView: View {
                 Image(systemName: "square.and.pencil")
                     .font(.system(size: 11, weight: .medium))
                     .frame(width: controlButtonSize, height: controlButtonSize)
-                    .background(Color(uiColor: SolarizedDarkTheme.base03))
-                    .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base0))
+                    .background(Color(uiColor: theme.surfaceBackground))
+                    .foregroundStyle(Color(uiColor: theme.tertiaryText))
                     .clipShape(RoundedRectangle(cornerRadius: 6))
             }
             .buttonStyle(.plain)
@@ -438,7 +439,7 @@ public struct StatusOverlayView: View {
     private var tmuxControls: some View {
         Divider()
             .frame(height: 16)
-            .background(Color(uiColor: SolarizedDarkTheme.base01).opacity(0.4))
+            .background(Color(uiColor: theme.separator).opacity(0.4))
 
         HStack(spacing: 4) {
             Image(systemName: "macwindow.on.rectangle")
@@ -448,13 +449,13 @@ public struct StatusOverlayView: View {
         }
         .padding(.horizontal, 7)
         .padding(.vertical, 5)
-        .background(Color(uiColor: SolarizedDarkTheme.violet).opacity(0.2))
-        .foregroundStyle(Color(uiColor: SolarizedDarkTheme.violet))
+        .background(Color(uiColor: theme.badgeAccent).opacity(0.2))
+        .foregroundStyle(Color(uiColor: theme.badgeAccent))
         .clipShape(Capsule())
 
         Divider()
             .frame(height: 16)
-            .background(Color(uiColor: SolarizedDarkTheme.base01).opacity(0.4))
+            .background(Color(uiColor: theme.separator).opacity(0.4))
 
         // Panes: Zoom, Split V, Split H, Join V, Join H, Mark, Next, Last, Break, Close
         HStack(spacing: 5) {
@@ -467,8 +468,8 @@ public struct StatusOverlayView: View {
                     Image(systemName: "arrow.up.left.and.arrow.down.right")
                         .font(.system(size: 11, weight: .medium))
                         .frame(width: controlButtonSize, height: controlButtonSize)
-                        .background(Color(uiColor: SolarizedDarkTheme.base03))
-                        .foregroundStyle(Color(uiColor: SolarizedDarkTheme.yellow))
+                        .background(Color(uiColor: theme.surfaceBackground))
+                        .foregroundStyle(Color(uiColor: theme.warning))
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
                 .buttonStyle(.plain)
@@ -483,8 +484,8 @@ public struct StatusOverlayView: View {
                     Image(systemName: "rectangle.split.2x1")
                         .font(.system(size: 11, weight: .medium))
                         .frame(width: controlButtonSize, height: controlButtonSize)
-                        .background(Color(uiColor: SolarizedDarkTheme.base03))
-                        .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base0))
+                        .background(Color(uiColor: theme.surfaceBackground))
+                        .foregroundStyle(Color(uiColor: theme.tertiaryText))
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
                 .buttonStyle(.plain)
@@ -499,8 +500,8 @@ public struct StatusOverlayView: View {
                     Image(systemName: "rectangle.split.1x2")
                         .font(.system(size: 11, weight: .medium))
                         .frame(width: controlButtonSize, height: controlButtonSize)
-                        .background(Color(uiColor: SolarizedDarkTheme.base03))
-                        .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base0))
+                        .background(Color(uiColor: theme.surfaceBackground))
+                        .foregroundStyle(Color(uiColor: theme.tertiaryText))
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
                 .buttonStyle(.plain)
@@ -515,8 +516,8 @@ public struct StatusOverlayView: View {
                     Image(systemName: "arrow.right.and.line.vertical.and.arrow.left")
                         .font(.system(size: 11, weight: .medium))
                         .frame(width: controlButtonSize, height: controlButtonSize)
-                        .background(Color(uiColor: SolarizedDarkTheme.base03))
-                        .foregroundStyle(Color(uiColor: SolarizedDarkTheme.orange))
+                        .background(Color(uiColor: theme.surfaceBackground))
+                        .foregroundStyle(Color(uiColor: theme.altAccent))
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
                 .buttonStyle(.plain)
@@ -531,8 +532,8 @@ public struct StatusOverlayView: View {
                     Image(systemName: "arrow.down.and.line.horizontal.and.arrow.up")
                         .font(.system(size: 11, weight: .medium))
                         .frame(width: controlButtonSize, height: controlButtonSize)
-                        .background(Color(uiColor: SolarizedDarkTheme.base03))
-                        .foregroundStyle(Color(uiColor: SolarizedDarkTheme.orange))
+                        .background(Color(uiColor: theme.surfaceBackground))
+                        .foregroundStyle(Color(uiColor: theme.altAccent))
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
                 .buttonStyle(.plain)
@@ -549,8 +550,8 @@ public struct StatusOverlayView: View {
                     Image(systemName: "pin")
                         .font(.system(size: 11, weight: .medium))
                         .frame(width: controlButtonSize, height: controlButtonSize)
-                        .background(Color(uiColor: SolarizedDarkTheme.base03))
-                        .foregroundStyle(Color(uiColor: SolarizedDarkTheme.orange))
+                        .background(Color(uiColor: theme.surfaceBackground))
+                        .foregroundStyle(Color(uiColor: theme.altAccent))
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
                 .buttonStyle(.plain)
@@ -565,8 +566,8 @@ public struct StatusOverlayView: View {
                     Image(systemName: "arrow.2.squarepath")
                         .font(.system(size: 11, weight: .medium))
                         .frame(width: controlButtonSize, height: controlButtonSize)
-                        .background(Color(uiColor: SolarizedDarkTheme.base03))
-                        .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
+                        .background(Color(uiColor: theme.surfaceBackground))
+                        .foregroundStyle(Color(uiColor: theme.accent))
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
                 .buttonStyle(.plain)
@@ -581,8 +582,8 @@ public struct StatusOverlayView: View {
                     Image(systemName: "arrow.left.arrow.right")
                         .font(.system(size: 11, weight: .medium))
                         .frame(width: controlButtonSize, height: controlButtonSize)
-                        .background(Color(uiColor: SolarizedDarkTheme.base03))
-                        .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
+                        .background(Color(uiColor: theme.surfaceBackground))
+                        .foregroundStyle(Color(uiColor: theme.accent))
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
                 .buttonStyle(.plain)
@@ -597,8 +598,8 @@ public struct StatusOverlayView: View {
                     Image(systemName: "rectangle.portrait.and.arrow.right")
                         .font(.system(size: 11, weight: .medium))
                         .frame(width: controlButtonSize, height: controlButtonSize)
-                        .background(Color(uiColor: SolarizedDarkTheme.base03))
-                        .foregroundStyle(Color(uiColor: SolarizedDarkTheme.violet))
+                        .background(Color(uiColor: theme.surfaceBackground))
+                        .foregroundStyle(Color(uiColor: theme.badgeAccent))
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
                 .buttonStyle(.plain)
@@ -613,8 +614,8 @@ public struct StatusOverlayView: View {
                     Image(systemName: "xmark")
                         .font(.system(size: 11, weight: .medium))
                         .frame(width: controlButtonSize, height: controlButtonSize)
-                        .background(Color(uiColor: SolarizedDarkTheme.base03))
-                        .foregroundStyle(Color(uiColor: SolarizedDarkTheme.red))
+                        .background(Color(uiColor: theme.surfaceBackground))
+                        .foregroundStyle(Color(uiColor: theme.error))
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
                 .buttonStyle(.plain)
@@ -625,7 +626,7 @@ public struct StatusOverlayView: View {
 
         Divider()
             .frame(height: 16)
-            .background(Color(uiColor: SolarizedDarkTheme.base01).opacity(0.4))
+            .background(Color(uiColor: theme.separator).opacity(0.4))
 
         // Window numbers 0..9
         HStack(spacing: 5) {
@@ -638,8 +639,8 @@ public struct StatusOverlayView: View {
                     Text("\(num)")
                         .font(.system(size: 12, weight: .semibold, design: .monospaced))
                         .frame(width: controlButtonSize, height: controlButtonSize)
-                        .background(Color(uiColor: SolarizedDarkTheme.base03))
-                        .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base1))
+                        .background(Color(uiColor: theme.surfaceBackground))
+                        .foregroundStyle(Color(uiColor: theme.primaryText))
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
                 .buttonStyle(.plain)
@@ -650,7 +651,7 @@ public struct StatusOverlayView: View {
 
         Divider()
             .frame(height: 16)
-            .background(Color(uiColor: SolarizedDarkTheme.base01).opacity(0.4))
+            .background(Color(uiColor: theme.separator).opacity(0.4))
 
         // Navigation: Prev / Next / New / Rename
         HStack(spacing: 5) {
@@ -662,8 +663,8 @@ public struct StatusOverlayView: View {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 11, weight: .semibold))
                     .frame(width: controlButtonSize, height: controlButtonSize)
-                    .background(Color(uiColor: SolarizedDarkTheme.base03))
-                    .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base0))
+                    .background(Color(uiColor: theme.surfaceBackground))
+                    .foregroundStyle(Color(uiColor: theme.tertiaryText))
                     .clipShape(RoundedRectangle(cornerRadius: 6))
             }
             .buttonStyle(.plain)
@@ -678,8 +679,8 @@ public struct StatusOverlayView: View {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 11, weight: .semibold))
                     .frame(width: controlButtonSize, height: controlButtonSize)
-                    .background(Color(uiColor: SolarizedDarkTheme.base03))
-                    .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base0))
+                    .background(Color(uiColor: theme.surfaceBackground))
+                    .foregroundStyle(Color(uiColor: theme.tertiaryText))
                     .clipShape(RoundedRectangle(cornerRadius: 6))
             }
             .buttonStyle(.plain)
@@ -694,8 +695,8 @@ public struct StatusOverlayView: View {
                 Image(systemName: "plus")
                     .font(.system(size: 11, weight: .semibold))
                     .frame(width: controlButtonSize, height: controlButtonSize)
-                    .background(Color(uiColor: SolarizedDarkTheme.base03))
-                    .foregroundStyle(Color(uiColor: SolarizedDarkTheme.green))
+                    .background(Color(uiColor: theme.surfaceBackground))
+                    .foregroundStyle(Color(uiColor: theme.success))
                     .clipShape(RoundedRectangle(cornerRadius: 6))
             }
             .buttonStyle(.plain)
@@ -710,8 +711,8 @@ public struct StatusOverlayView: View {
                 Image(systemName: "pencil.line")
                     .font(.system(size: 11, weight: .semibold))
                     .frame(width: controlButtonSize, height: controlButtonSize)
-                    .background(Color(uiColor: SolarizedDarkTheme.base03))
-                    .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
+                    .background(Color(uiColor: theme.surfaceBackground))
+                    .foregroundStyle(Color(uiColor: theme.accent))
                     .clipShape(RoundedRectangle(cornerRadius: 6))
             }
             .buttonStyle(.plain)
@@ -734,7 +735,7 @@ public struct StatusOverlayView: View {
                         Group {
                             Divider()
                                 .frame(height: 16)
-                                .background(Color(uiColor: SolarizedDarkTheme.base01).opacity(0.4))
+                                .background(Color(uiColor: theme.separator).opacity(0.4))
 
                             helpButton
                         }
@@ -749,7 +750,7 @@ public struct StatusOverlayView: View {
                 HStack(spacing: 8) {
                     Divider()
                         .frame(height: 16)
-                        .background(Color(uiColor: SolarizedDarkTheme.base01).opacity(0.4))
+                        .background(Color(uiColor: theme.separator).opacity(0.4))
 
                     helpButton
                 }
@@ -757,7 +758,7 @@ public struct StatusOverlayView: View {
                 .padding(.vertical, 6)
             }
         }
-        .background(Color(uiColor: SolarizedDarkTheme.base03).opacity(0.6))
+        .background(Color(uiColor: theme.surfaceBackground).opacity(0.6))
     }
 
     private var tmuxControlBar: some View {
@@ -773,8 +774,8 @@ public struct StatusOverlayView: View {
             Image(systemName: "questionmark.circle")
                 .font(.system(size: 11, weight: .medium))
                 .frame(width: controlButtonSize, height: controlButtonSize)
-                .background(Color(uiColor: SolarizedDarkTheme.base03))
-                .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base0))
+                .background(Color(uiColor: theme.surfaceBackground))
+                .foregroundStyle(Color(uiColor: theme.tertiaryText))
                 .clipShape(RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(.plain)
@@ -836,21 +837,21 @@ public struct StatusOverlayView: View {
         switch sessionManager.state {
         case .connected:
             Circle()
-                .fill(Color(uiColor: SolarizedDarkTheme.green))
+                .fill(Color(uiColor: theme.success))
                 .frame(width: 8, height: 8)
         case .connecting, .reconnecting:
             ProgressView()
                 .scaleEffect(0.65)
-                .tint(Color(uiColor: SolarizedDarkTheme.yellow))
+                .tint(Color(uiColor: theme.warning))
                 .frame(width: 8, height: 8)
         case .disconnected:
             Circle()
-                .fill(Color(uiColor: SolarizedDarkTheme.base01))
+                .fill(Color(uiColor: theme.mutedText))
                 .frame(width: 8, height: 8)
         case .failed:
             Button(action: { showingDiagnosticSheet = true }) {
                 Circle()
-                    .fill(Color(uiColor: SolarizedDarkTheme.red))
+                    .fill(Color(uiColor: theme.error))
                     .frame(width: 8, height: 8)
             }
             .buttonStyle(.borderless)
@@ -866,14 +867,14 @@ public struct StatusOverlayView: View {
             HStack(spacing: 4) {
                 Text(hostName)
                     .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base1))
+                    .foregroundStyle(Color(uiColor: theme.primaryText))
                     .lineLimit(1)
                     .textSelection(.enabled)
 
                 if (sessionManager.activeHost?.autoConnectTmux ?? false) && !tmuxSession.isEmpty && UIDevice.current.userInterfaceIdiom != .phone {
                     Text("• tmux: \(tmuxSession)")
                         .font(.system(size: 12, weight: .regular, design: .monospaced))
-                        .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base00))
+                        .foregroundStyle(Color(uiColor: theme.secondaryText))
                         .lineLimit(1)
                         .textSelection(.enabled)
                 }
@@ -901,8 +902,8 @@ public struct StatusOverlayView: View {
                             .font(.system(size: 10, weight: .semibold))
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
-                            .background(Color(uiColor: SolarizedDarkTheme.base03))
-                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
+                            .background(Color(uiColor: theme.surfaceBackground))
+                            .foregroundStyle(Color(uiColor: theme.accent))
                             .clipShape(Capsule())
                         }
                         .buttonStyle(.borderless)
@@ -913,7 +914,7 @@ public struct StatusOverlayView: View {
                         }) {
                             Image(systemName: "info.circle.fill")
                                 .font(.system(size: 12))
-                                .foregroundStyle(Color(uiColor: SolarizedDarkTheme.yellow))
+                                .foregroundStyle(Color(uiColor: theme.warning))
                         }
                         .buttonStyle(.borderless)
                     }
@@ -930,7 +931,7 @@ public struct StatusOverlayView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(sessionManager.lastError ?? sessionManager.state.description)
                             .font(.system(size: 13, design: .monospaced))
-                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.red))
+                            .foregroundStyle(Color(uiColor: theme.error))
                             .textSelection(.enabled)
 
                         Button(action: {
@@ -940,7 +941,7 @@ public struct StatusOverlayView: View {
                             Label(copiedFeedback == "Error Copied" ? "Copied Error to Clipboard" : "Copy Error Message",
                                   systemImage: copiedFeedback == "Error Copied" ? "checkmark" : "doc.on.doc")
                                 .font(.subheadline.bold())
-                                .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
+                                .foregroundStyle(Color(uiColor: theme.accent))
                         }
                     }
                     .padding(.vertical, 4)
@@ -951,7 +952,7 @@ public struct StatusOverlayView: View {
                         VStack(alignment: .leading, spacing: 6) {
                             Text("The configured SSH key could not be retrieved from secure storage or appears invalid.")
                                 .font(.caption)
-                                .foregroundStyle(Color(uiColor: SolarizedDarkTheme.yellow))
+                                .foregroundStyle(Color(uiColor: theme.warning))
                             Text("This may happen if the key was not transferred during a device migration or was removed from Keychain.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -969,7 +970,7 @@ public struct StatusOverlayView: View {
                         VStack(alignment: .leading, spacing: 6) {
                             Text("Modern OpenSSH servers (Debian 12+, Ubuntu 22.04+, Arch, macOS) disable 'ssh-rsa' (SHA-1) by default. Citadel signs RSA keys with 'ssh-rsa', so modern servers will reject it even when added to authorized_keys.")
                                 .font(.caption)
-                                .foregroundStyle(Color(uiColor: SolarizedDarkTheme.yellow))
+                                .foregroundStyle(Color(uiColor: theme.warning))
 
                             Text("Recommended Fixes:")
                                 .font(.caption.bold())
@@ -980,7 +981,7 @@ public struct StatusOverlayView: View {
                             Text("   PubkeyAcceptedAlgorithms +ssh-rsa")
                                 .font(.system(size: 11, design: .monospaced))
                                 .padding(4)
-                                .background(Color(uiColor: SolarizedDarkTheme.base03))
+                                .background(Color(uiColor: theme.secondarySurface))
                                 .cornerRadius(4)
                                 .textSelection(.enabled)
                             Text("   then run: sudo systemctl restart ssh")
@@ -1024,7 +1025,7 @@ public struct StatusOverlayView: View {
                                         Label(copiedFeedback == "Public Key Copied" ? "Copied!" : "Copy Public Key",
                                               systemImage: copiedFeedback == "Public Key Copied" ? "checkmark" : "doc.on.doc")
                                             .font(.caption.bold())
-                                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
+                                            .foregroundStyle(Color(uiColor: theme.accent))
                                     }
                                     .buttonStyle(.borderless)
                                 }
@@ -1050,7 +1051,7 @@ public struct StatusOverlayView: View {
                                     Label(copiedFeedback == "Public Key Copied" ? "Copied!" : "Copy Public Key",
                                           systemImage: copiedFeedback == "Public Key Copied" ? "checkmark" : "doc.on.doc")
                                         .font(.caption.bold())
-                                        .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
+                                        .foregroundStyle(Color(uiColor: theme.accent))
                                 }
                                 .buttonStyle(.borderless)
                             }
@@ -1070,7 +1071,7 @@ public struct StatusOverlayView: View {
                         Text("   whoami")
                             .font(.system(size: 11, design: .monospaced))
                             .padding(4)
-                            .background(Color(uiColor: SolarizedDarkTheme.base03))
+                            .background(Color(uiColor: theme.secondarySurface))
                             .cornerRadius(4)
                             .textSelection(.enabled)
 
@@ -1079,7 +1080,7 @@ public struct StatusOverlayView: View {
                         Text("   chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys")
                             .font(.system(size: 11, design: .monospaced))
                             .padding(4)
-                            .background(Color(uiColor: SolarizedDarkTheme.base03))
+                            .background(Color(uiColor: theme.secondarySurface))
                             .cornerRadius(4)
                             .textSelection(.enabled)
 
@@ -1088,7 +1089,7 @@ public struct StatusOverlayView: View {
                         Text("   sudo journalctl -u ssh -n 50 --no-pager")
                             .font(.system(size: 11, design: .monospaced))
                             .padding(4)
-                            .background(Color(uiColor: SolarizedDarkTheme.base03))
+                            .background(Color(uiColor: theme.secondarySurface))
                             .cornerRadius(4)
                             .textSelection(.enabled)
                     }
@@ -1102,7 +1103,7 @@ public struct StatusOverlayView: View {
                         Label(copiedFeedback == "Diagnostic Report Copied" ? "Report Copied to Clipboard" : "Copy Complete Diagnostic Report",
                               systemImage: copiedFeedback == "Diagnostic Report Copied" ? "checkmark" : "doc.on.doc")
                             .font(.subheadline.bold())
-                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.yellow))
+                            .foregroundStyle(Color(uiColor: theme.warning))
                     }
                 }
             }
@@ -1171,13 +1172,13 @@ public struct StatusOverlayView: View {
     private var statusColor: Color {
         switch sessionManager.state {
         case .connected:
-            return Color(uiColor: SolarizedDarkTheme.green)
+            return Color(uiColor: theme.success)
         case .connecting, .reconnecting:
-            return Color(uiColor: SolarizedDarkTheme.yellow)
+            return Color(uiColor: theme.warning)
         case .failed:
-            return Color(uiColor: SolarizedDarkTheme.red)
+            return Color(uiColor: theme.error)
         case .disconnected:
-            return Color(uiColor: SolarizedDarkTheme.base01)
+            return Color(uiColor: theme.mutedText)
         }
     }
 }

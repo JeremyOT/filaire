@@ -8,6 +8,7 @@ import SwiftUI
 public struct SnippetParameterView: View {
     public let context: TerminalSessionContext
     @Bindable public var interaction: TerminalInteractionState
+    @Environment(\.terminalTheme) private var theme
 
     public init(context: TerminalSessionContext, interaction: TerminalInteractionState) {
         self.context = context
@@ -104,7 +105,7 @@ public struct SnippetParameterView: View {
                 if destinationChanged(invocation) {
                     Text("The selected host changed since you opened this snippet. Choose a valid destination before continuing.")
                         .font(.caption)
-                        .foregroundStyle(Color(uiColor: SolarizedDarkTheme.yellow))
+                        .foregroundStyle(Color(uiColor: theme.warning))
                 }
                 Text("POSIX shell quoting (sh, bash, zsh)")
                     .font(.caption)
@@ -138,12 +139,12 @@ public struct SnippetParameterView: View {
                         .font(.caption)
                         Text("Once sent, a secret is part of the command text and may enter the remote shell history.")
                             .font(.caption)
-                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.yellow))
+                            .foregroundStyle(Color(uiColor: theme.warning))
                     }
                 } else if let problem = problem(invocation) {
                     Text(problem)
                         .font(.caption)
-                        .foregroundStyle(Color(uiColor: SolarizedDarkTheme.red))
+                        .foregroundStyle(Color(uiColor: theme.error))
                 }
             }
         }

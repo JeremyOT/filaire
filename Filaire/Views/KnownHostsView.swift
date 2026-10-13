@@ -1,6 +1,7 @@
 import SwiftUI
 
 public struct KnownHostsView: View {
+    @Environment(\.terminalTheme) private var theme
     @State private var entries: [KnownHostEntry] = []
 
     public init() {}
@@ -28,8 +29,8 @@ public struct KnownHostsView: View {
                                     .font(.caption)
                                     .padding(.horizontal, 6)
                                     .padding(.vertical, 2)
-                                    .background(Color(uiColor: SolarizedDarkTheme.base02))
-                                    .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
+                                    .background(Color(uiColor: theme.secondarySurface))
+                                    .foregroundStyle(Color(uiColor: theme.accent))
                                     .clipShape(Capsule())
                             }
 

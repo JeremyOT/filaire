@@ -25,19 +25,21 @@ public final class FilaireAccessoryView: UIInputView, UIInputViewAudioFeedback {
 
     public private(set) var isControlActive: Bool = false {
         didSet {
-            ctrlButton.backgroundColor = isControlActive ? SolarizedDarkTheme.yellow : SolarizedDarkTheme.base03
-            ctrlButton.setTitleColor(isControlActive ? SolarizedDarkTheme.base03 : SolarizedDarkTheme.base0, for: .normal)
+            updateModifierButtonStates()
             accessoryDelegate?.accessoryDidToggleControl(isActive: isControlActive)
         }
     }
 
     public private(set) var isAltActive: Bool = false {
         didSet {
-            altButton.backgroundColor = isAltActive ? SolarizedDarkTheme.orange : SolarizedDarkTheme.base03
-            altButton.setTitleColor(isAltActive ? SolarizedDarkTheme.base03 : SolarizedDarkTheme.base0, for: .normal)
+            updateModifierButtonStates()
             accessoryDelegate?.accessoryDidToggleAlt(isActive: isAltActive)
         }
     }
+
+    private var normalButtons: [UIButton] = []
+    private var separatorView: UIView?
+    private var currentTheme: any TerminalTheme = ThemeManager.shared.currentTheme
 
     private let scrollView = UIScrollView()
     private let stackView = UIStackView()
@@ -137,13 +139,14 @@ public final class FilaireAccessoryView: UIInputView, UIInputViewAudioFeedback {
     }
 
     private func setupView() {
-        backgroundColor = SolarizedDarkTheme.base02
+        backgroundColor = currentTheme.secondarySurface
         autoresizingMask = [.flexibleWidth, .flexibleHeight]
 
         // Top separator line
         let separator = UIView()
         separator.translatesAutoresizingMaskIntoConstraints = false
-        separator.backgroundColor = SolarizedDarkTheme.base01.withAlphaComponent(0.4)
+        separator.backgroundColor = currentTheme.separator.withAlphaComponent(0.4)
+        self.separatorView = separator
         addSubview(separator)
 
         scrollView.translatesAutoresizingMaskIntoConstraints = false
@@ -229,6 +232,8 @@ public final class FilaireAccessoryView: UIInputView, UIInputViewAudioFeedback {
             stackView.trailingAnchor.constraint(equalTo: scrollView.trailingAnchor),
             stackView.heightAnchor.constraint(equalTo: scrollView.heightAnchor)
         ])
+
+        applyTheme(ThemeManager.shared.currentTheme)
     }
 
     public override var intrinsicContentSize: CGSize {
@@ -240,6 +245,51 @@ public final class FilaireAccessoryView: UIInputView, UIInputViewAudioFeedback {
         if isAltActive { isAltActive = false }
     }
 
+    public func applyTheme(_ theme: any TerminalTheme) {
+        self.currentTheme = theme
+        backgroundColor = theme.secondarySurface
+        separatorView?.backgroundColor = theme.separator.withAlphaComponent(0.4)
+
+        for button in normalButtons {
+            button.backgroundColor = theme.tertiarySurface
+            button.layer.borderColor = theme.separator.cgColor
+            var config = button.configuration
+            config?.baseForegroundColor = theme.secondaryText
+            button.configuration = config
+        }
+
+        // tmuxPrefixButton is accent
+        tmuxPrefixButton.backgroundColor = theme.accent.withAlphaComponent(0.25)
+        tmuxPrefixButton.layer.borderColor = theme.accent.cgColor
+        var prefixConfig = tmuxPrefixButton.configuration
+        prefixConfig?.baseForegroundColor = theme.accent
+        tmuxPrefixButton.configuration = prefixConfig
+
+        // dismissKeyboardButton
+        dismissKeyboardButton.backgroundColor = theme.tertiarySurface
+        dismissKeyboardButton.layer.borderColor = theme.separator.cgColor
+        var dismissConfig = dismissKeyboardButton.configuration
+        dismissConfig?.baseForegroundColor = theme.mutedText
+        dismissKeyboardButton.configuration = dismissConfig
+
+        updateModifierButtonStates()
+    }
+
+    private func updateModifierButtonStates() {
+        let theme = currentTheme
+        ctrlButton.backgroundColor = isControlActive ? theme.warning : theme.tertiarySurface
+        ctrlButton.setTitleColor(isControlActive ? theme.surfaceBackground : theme.secondaryText, for: .normal)
+        var ctrlConfig = ctrlButton.configuration
+        ctrlConfig?.baseForegroundColor = isControlActive ? theme.surfaceBackground : theme.secondaryText
+        ctrlButton.configuration = ctrlConfig
+
+        altButton.backgroundColor = isAltActive ? theme.altAccent : theme.tertiarySurface
+        altButton.setTitleColor(isAltActive ? theme.surfaceBackground : theme.secondaryText, for: .normal)
+        var altConfig = altButton.configuration
+        altConfig?.baseForegroundColor = isAltActive ? theme.surfaceBackground : theme.secondaryText
+        altButton.configuration = altConfig
+    }
+
     // MARK: - Button Factory
 
     private func makeButton(
@@ -247,6 +297,7 @@ public final class FilaireAccessoryView: UIInputView, UIInputViewAudioFeedback {
         isAccent: Bool = false,
         action: Selector
     ) -> UIButton {
+        let theme = currentTheme
         var config = UIButton.Configuration.plain()
         config.title = title
         config.titleLineBreakMode = .byClipping
@@ -256,58 +307,64 @@ public final class FilaireAccessoryView: UIInputView, UIInputViewAudioFeedback {
             return outgoing
         }
         config.contentInsets = NSDirectionalEdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8)
-        config.baseForegroundColor = isAccent ? SolarizedDarkTheme.cyan : SolarizedDarkTheme.base0
+        config.baseForegroundColor = isAccent ? theme.accent : theme.secondaryText
 
         let button = UIButton(configuration: config)
         button.translatesAutoresizingMaskIntoConstraints = false
         button.titleLabel?.numberOfLines = 1
         button.titleLabel?.lineBreakMode = .byClipping
 
-        let bg = isAccent ? SolarizedDarkTheme.cyan.withAlphaComponent(0.25) : SolarizedDarkTheme.base03
+        let bg = isAccent ? theme.accent.withAlphaComponent(0.25) : theme.tertiarySurface
         button.backgroundColor = bg
         button.layer.cornerRadius = 6
         button.layer.borderWidth = isAccent ? 1.5 : 0.5
-        button.layer.borderColor = (isAccent ? SolarizedDarkTheme.cyan : SolarizedDarkTheme.base01).cgColor
+        button.layer.borderColor = (isAccent ? theme.accent : theme.separator).cgColor
         button.addTarget(self, action: action, for: .touchUpInside)
         button.widthAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
         button.setContentHuggingPriority(.required, for: .horizontal)
         button.setContentCompressionResistancePriority(.required, for: .horizontal)
+        if !isAccent {
+            normalButtons.append(button)
+        }
         return button
     }
 
     private func makeArrowButton(symbol: String, action: Selector) -> UIButton {
+        let theme = currentTheme
         var config = UIButton.Configuration.plain()
         let imageConfig = UIImage.SymbolConfiguration(pointSize: 11, weight: .bold)
         config.image = UIImage(systemName: symbol, withConfiguration: imageConfig)
-        config.baseForegroundColor = SolarizedDarkTheme.base0
+        config.baseForegroundColor = theme.secondaryText
         config.contentInsets = NSDirectionalEdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8)
 
         let button = UIButton(configuration: config)
         button.translatesAutoresizingMaskIntoConstraints = false
-        button.backgroundColor = SolarizedDarkTheme.base03
+        button.backgroundColor = theme.tertiarySurface
         button.layer.cornerRadius = 6
         button.layer.borderWidth = 0.5
-        button.layer.borderColor = SolarizedDarkTheme.base01.cgColor
+        button.layer.borderColor = theme.separator.cgColor
         button.addTarget(self, action: action, for: .touchUpInside)
         button.widthAnchor.constraint(equalToConstant: 44).isActive = true
         button.setContentHuggingPriority(.required, for: .horizontal)
         button.setContentCompressionResistancePriority(.required, for: .horizontal)
+        normalButtons.append(button)
         return button
     }
 
     private func makeIconButton(systemName: String, action: Selector) -> UIButton {
+        let theme = currentTheme
         var config = UIButton.Configuration.plain()
         let imageConfig = UIImage.SymbolConfiguration(pointSize: 12, weight: .regular)
         config.image = UIImage(systemName: systemName, withConfiguration: imageConfig)
-        config.baseForegroundColor = SolarizedDarkTheme.base01
+        config.baseForegroundColor = theme.mutedText
         config.contentInsets = NSDirectionalEdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8)
 
         let button = UIButton(configuration: config)
         button.translatesAutoresizingMaskIntoConstraints = false
-        button.backgroundColor = SolarizedDarkTheme.base03
+        button.backgroundColor = theme.tertiarySurface
         button.layer.cornerRadius = 6
         button.layer.borderWidth = 0.5
-        button.layer.borderColor = SolarizedDarkTheme.base01.cgColor
+        button.layer.borderColor = theme.separator.cgColor
         button.addTarget(self, action: action, for: .touchUpInside)
         button.setContentHuggingPriority(.required, for: .horizontal)
         button.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -315,6 +372,7 @@ public final class FilaireAccessoryView: UIInputView, UIInputViewAudioFeedback {
     }
 
     private func makeSymbolButton(symbol: String) -> UIButton {
+        let theme = currentTheme
         var config = UIButton.Configuration.plain()
         config.title = symbol
         config.titleLineBreakMode = .byClipping
@@ -323,17 +381,17 @@ public final class FilaireAccessoryView: UIInputView, UIInputViewAudioFeedback {
             outgoing.font = UIFont.monospacedSystemFont(ofSize: 14, weight: .medium)
             return outgoing
         }
-        config.baseForegroundColor = SolarizedDarkTheme.base0
+        config.baseForegroundColor = theme.secondaryText
         config.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 8, bottom: 6, trailing: 8)
 
         let button = UIButton(configuration: config)
         button.translatesAutoresizingMaskIntoConstraints = false
         button.titleLabel?.numberOfLines = 1
         button.titleLabel?.lineBreakMode = .byClipping
-        button.backgroundColor = SolarizedDarkTheme.base03
+        button.backgroundColor = theme.tertiarySurface
         button.layer.cornerRadius = 6
         button.layer.borderWidth = 0.5
-        button.layer.borderColor = SolarizedDarkTheme.base01.cgColor
+        button.layer.borderColor = theme.separator.cgColor
         button.addAction(UIAction { [weak self] _ in
             self?.playClick()
             self?.accessoryDelegate?.accessoryDidInsertText(symbol)
@@ -341,6 +399,7 @@ public final class FilaireAccessoryView: UIInputView, UIInputViewAudioFeedback {
         button.widthAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
         button.setContentHuggingPriority(.required, for: .horizontal)
         button.setContentCompressionResistancePriority(.required, for: .horizontal)
+        normalButtons.append(button)
         return button
     }
 

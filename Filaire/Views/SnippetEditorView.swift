@@ -5,6 +5,7 @@ import SwiftUI
 public struct SnippetEditorView: View {
     public let context: TerminalSessionContext
     @Bindable public var interaction: TerminalInteractionState
+    @Environment(\.terminalTheme) private var theme
     @State private var draft: CommandSnippet
     @State private var message: String?
     @State private var conflict: CommandSnippet?
@@ -87,7 +88,7 @@ public struct SnippetEditorView: View {
                     Section {
                         Text("Defined but unused: \(validation.unusedParameterNames.joined(separator: ", "))")
                             .font(.caption)
-                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.yellow))
+                            .foregroundStyle(Color(uiColor: theme.warning))
                     }
                 }
 
@@ -95,13 +96,13 @@ public struct SnippetEditorView: View {
                     Section {
                         Text(problem)
                             .font(.caption)
-                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.red))
+                            .foregroundStyle(Color(uiColor: theme.error))
                     }
                 }
 
                 if let message {
                     Section {
-                        Text(message).font(.caption).foregroundStyle(Color(uiColor: SolarizedDarkTheme.red))
+                        Text(message).font(.caption).foregroundStyle(Color(uiColor: theme.error))
                     }
                 }
             }

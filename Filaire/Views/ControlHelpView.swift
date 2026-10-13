@@ -77,6 +77,7 @@ public enum ControlHelp {
 
 public struct ControlHelpView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.terminalTheme) private var theme
 
     public init() {}
 
@@ -112,7 +113,7 @@ public struct ControlHelpView: View {
             Image(systemName: entry.symbol)
                 .font(.system(size: 14))
                 .frame(width: 26, height: 26)
-                .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
+                .foregroundStyle(Color(uiColor: theme.accent))
                 .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 3) {

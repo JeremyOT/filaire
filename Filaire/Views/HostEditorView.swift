@@ -2,6 +2,7 @@ import SwiftUI
 
 public struct HostEditorView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.terminalTheme) private var theme
 
     @State private var draftHost: HostProfile
     @Binding public var availableKeys: [SSHKeyModel]
@@ -87,7 +88,7 @@ public struct HostEditorView: View {
                                     showingKeyManagement = true
                                 }
                                 .font(.subheadline.bold())
-                                .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
+                                .foregroundStyle(Color(uiColor: theme.accent))
                             }
                             .padding(.vertical, 4)
                         } else {
@@ -105,14 +106,14 @@ public struct HostEditorView: View {
                                             .font(.caption2.bold())
                                             .padding(.horizontal, 6)
                                             .padding(.vertical, 2)
-                                            .background(Color(uiColor: SolarizedDarkTheme.base02))
-                                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
+                                            .background(Color(uiColor: theme.secondarySurface))
+                                            .foregroundStyle(Color(uiColor: theme.accent))
                                             .clipShape(Capsule())
 
                                         if key.keyType == "RSA" {
                                             Text("⚠️ OpenSSH 8.8+ disables ssh-rsa")
                                                 .font(.caption2.bold())
-                                                .foregroundStyle(Color(uiColor: SolarizedDarkTheme.yellow))
+                                                .foregroundStyle(Color(uiColor: theme.warning))
                                         }
                                     }
 
@@ -128,14 +129,14 @@ public struct HostEditorView: View {
                                         Label(copiedFeedback == "Public Key Copied" ? "Copied!" : "Copy Public Key",
                                               systemImage: copiedFeedback == "Public Key Copied" ? "checkmark" : "doc.on.doc")
                                             .font(.caption.bold())
-                                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
+                                            .foregroundStyle(Color(uiColor: theme.accent))
                                     }
                                     .buttonStyle(.borderless)
 
                                     Button(action: { beginInstall() }) {
                                         Label("Install with Password...", systemImage: "key.horizontal")
                                             .font(.caption.bold())
-                                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
+                                            .foregroundStyle(Color(uiColor: theme.accent))
                                     }
                                     .buttonStyle(.borderless)
                                     .disabled(!canInstall)
@@ -143,12 +144,12 @@ public struct HostEditorView: View {
                                     if case .succeeded(let message) = installCoordinator.phase {
                                         Text(message)
                                             .font(.caption2)
-                                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.green))
+                                            .foregroundStyle(Color(uiColor: theme.success))
                                     }
                                     if case .failed(let message) = installCoordinator.phase {
                                         Text(message)
                                             .font(.caption2)
-                                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.red))
+                                            .foregroundStyle(Color(uiColor: theme.error))
                                             .textSelection(.enabled)
                                     }
                                 }
@@ -159,7 +160,7 @@ public struct HostEditorView: View {
                                 showingKeyManagement = true
                             }
                             .font(.caption)
-                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
+                            .foregroundStyle(Color(uiColor: theme.accent))
                         }
                     } else {
                         SecureField("Password (saved in Keychain)", text: $password)
@@ -199,10 +200,10 @@ public struct HostEditorView: View {
 
                             Text(draftHost.tmuxPrefixDisplay)
                                 .font(.system(size: 12, weight: .bold, design: .monospaced))
-                                .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
+                                .foregroundStyle(Color(uiColor: theme.accent))
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
-                                .background(Color(uiColor: SolarizedDarkTheme.cyan).opacity(0.15))
+                                .background(Color(uiColor: theme.accent).opacity(0.15))
                                 .clipShape(RoundedRectangle(cornerRadius: 4))
                         }
 
@@ -253,7 +254,7 @@ public struct HostEditorView: View {
 
                     Button(action: { showingAddPortForward = true }) {
                         Label("Add Port Forward Rule", systemImage: "plus")
-                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
+                            .foregroundStyle(Color(uiColor: theme.accent))
                     }
                 }
 

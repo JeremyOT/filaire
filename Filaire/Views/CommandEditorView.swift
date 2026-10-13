@@ -66,9 +66,10 @@ public struct CommandEditorView: UIViewRepresentable {
         view.smartInsertDeleteType = .no
         view.spellCheckingType = .no
         view.dataDetectorTypes = []
-        view.backgroundColor = SolarizedDarkTheme.base03
-        view.textColor = SolarizedDarkTheme.base1
-        view.tintColor = SolarizedDarkTheme.cyan
+        let theme = ThemeManager.shared.currentTheme
+        view.backgroundColor = theme.surfaceBackground
+        view.textColor = theme.primaryText
+        view.tintColor = theme.accent
         view.textContainerInset = UIEdgeInsets(top: 10, left: 8, bottom: 10, right: 8)
         view.alwaysBounceVertical = true
         view.text = text
@@ -78,6 +79,17 @@ public struct CommandEditorView: UIViewRepresentable {
     public func updateUIView(_ uiView: EditorTextView, context: Context) {
         uiView.onRun = onRun
         uiView.onDismiss = onDismiss
+
+        let theme = ThemeManager.shared.currentTheme
+        if uiView.backgroundColor != theme.surfaceBackground {
+            uiView.backgroundColor = theme.surfaceBackground
+        }
+        if uiView.textColor != theme.primaryText {
+            uiView.textColor = theme.primaryText
+        }
+        if uiView.tintColor != theme.accent {
+            uiView.tintColor = theme.accent
+        }
 
         // Adopt external text changes (snippet prefill, Clear, visible line-ending normalization) without
         // disturbing an in-progress IME composition.

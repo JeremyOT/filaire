@@ -20,6 +20,7 @@ public struct TerminalContainerView: View {
     public var isCoveredByPresentation: Bool = false
     public var onUserInput: (() -> Void)?
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.terminalTheme) private var theme
 
     public init(sessionManager: SessionManager, isStatusExpanded: Bool = false, isCoveredByPresentation: Bool = false, onUserInput: (() -> Void)? = nil) {
         self.sessionManager = sessionManager
@@ -61,7 +62,7 @@ public struct TerminalContainerView: View {
                 CommandComposerView(context: context, interaction: context.interaction)
                     .padding(.top, 8)
                     .presentationDetents([.medium, .large])
-                    .presentationBackground(Color(uiColor: SolarizedDarkTheme.base03))
+                    .presentationBackground(Color(uiColor: theme.surfaceBackground))
             }
             .sheet(isPresented: Binding(
                 get: { context.interaction.isSnippetLibraryPresented },

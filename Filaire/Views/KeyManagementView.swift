@@ -7,6 +7,7 @@ import LocalAuthentication
 public struct KeyManagementView: View {
     @Binding public var keys: [SSHKeyModel]
     public let onSelectKey: ((SSHKeyModel) -> Void)?
+    @Environment(\.terminalTheme) private var theme
 
     @State private var showingGenerateSheet = false
     @State private var showingImportSheet = false
@@ -50,8 +51,8 @@ public struct KeyManagementView: View {
                                     .font(.caption2.bold())
                                     .padding(.horizontal, 6)
                                     .padding(.vertical, 2)
-                                    .background(Color(uiColor: SolarizedDarkTheme.green).opacity(0.2))
-                                    .foregroundStyle(Color(uiColor: SolarizedDarkTheme.green))
+                                    .background(Color(uiColor: theme.success).opacity(0.2))
+                                    .foregroundStyle(Color(uiColor: theme.success))
                                     .clipShape(Capsule())
                                 }
 
@@ -63,8 +64,8 @@ public struct KeyManagementView: View {
                                     .font(.caption2.bold())
                                     .padding(.horizontal, 6)
                                     .padding(.vertical, 2)
-                                    .background(Color(uiColor: SolarizedDarkTheme.yellow).opacity(0.2))
-                                    .foregroundStyle(Color(uiColor: SolarizedDarkTheme.yellow))
+                                    .background(Color(uiColor: theme.warning).opacity(0.2))
+                                    .foregroundStyle(Color(uiColor: theme.warning))
                                     .clipShape(Capsule())
                                 }
 
@@ -72,15 +73,15 @@ public struct KeyManagementView: View {
                                     .font(.caption)
                                     .padding(.horizontal, 6)
                                     .padding(.vertical, 2)
-                                    .background(Color(uiColor: SolarizedDarkTheme.base02))
-                                    .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
+                                    .background(Color(uiColor: theme.secondarySurface))
+                                    .foregroundStyle(Color(uiColor: theme.accent))
                                     .clipShape(Capsule())
                             }
 
                             if key.keyType == "RSA" {
                                 Text("⚠️ OpenSSH 8.8+ disables ssh-rsa by default. Ed25519 recommended.")
                                     .font(.caption2.bold())
-                                    .foregroundStyle(Color(uiColor: SolarizedDarkTheme.yellow))
+                                    .foregroundStyle(Color(uiColor: theme.warning))
                             }
 
                             Text(key.publicKey)
@@ -94,7 +95,7 @@ public struct KeyManagementView: View {
                                     unlockAndRevealPublicKey(for: key)
                                 }
                                 .font(.caption.bold())
-                                .foregroundStyle(Color(uiColor: SolarizedDarkTheme.yellow))
+                                .foregroundStyle(Color(uiColor: theme.warning))
                                 .buttonStyle(.borderless)
                             }
 
@@ -105,7 +106,7 @@ public struct KeyManagementView: View {
                                         systemImage: copiedKeyId == key.id ? "checkmark" : "doc.on.doc"
                                     )
                                     .font(.caption.bold())
-                                    .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
+                                    .foregroundStyle(Color(uiColor: theme.accent))
                                 }
                                 .buttonStyle(.borderless)
 
@@ -132,7 +133,7 @@ public struct KeyManagementView: View {
                     showingGenerateSheet = true
                 }) {
                     Label("Generate New Ed25519 Key", systemImage: "key.fill")
-                        .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
+                        .foregroundStyle(Color(uiColor: theme.accent))
                 }
 
                 Button(action: {
@@ -140,7 +141,7 @@ public struct KeyManagementView: View {
                     showingImportSheet = true
                 }) {
                     Label("Import Existing Private Key", systemImage: "square.and.arrow.down")
-                        .foregroundStyle(Color(uiColor: SolarizedDarkTheme.yellow))
+                        .foregroundStyle(Color(uiColor: theme.warning))
                 }
             }
         }
@@ -164,7 +165,7 @@ public struct KeyManagementView: View {
                         Section {
                             VStack(alignment: .leading, spacing: 6) {
                                 Text(error)
-                                    .foregroundStyle(Color(uiColor: SolarizedDarkTheme.red))
+                                    .foregroundStyle(Color(uiColor: theme.error))
                                     .font(.caption)
                                     .textSelection(.enabled)
 
@@ -175,7 +176,7 @@ public struct KeyManagementView: View {
                                 }) {
                                     Label("Copy Error", systemImage: "doc.on.doc")
                                         .font(.caption2.bold())
-                                        .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
+                                        .foregroundStyle(Color(uiColor: theme.accent))
                                 }
                             }
                         }
@@ -223,7 +224,7 @@ public struct KeyManagementView: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("⚠️ RSA Key Detected")
                                     .font(.subheadline.bold())
-                                    .foregroundStyle(Color(uiColor: SolarizedDarkTheme.yellow))
+                                    .foregroundStyle(Color(uiColor: theme.warning))
                                 Text("Modern OpenSSH servers (v8.8+, Debian 12+, Ubuntu 22.04+, macOS) reject 'ssh-rsa' (SHA-1) by default. If your server rejects this key, generate an Ed25519 key or add 'PubkeyAcceptedAlgorithms +ssh-rsa' to /etc/ssh/sshd_config.")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
@@ -235,7 +236,7 @@ public struct KeyManagementView: View {
                         Section {
                             VStack(alignment: .leading, spacing: 6) {
                                 Text(error)
-                                    .foregroundStyle(Color(uiColor: SolarizedDarkTheme.red))
+                                    .foregroundStyle(Color(uiColor: theme.error))
                                     .font(.caption)
                                     .textSelection(.enabled)
 
@@ -246,7 +247,7 @@ public struct KeyManagementView: View {
                                 }) {
                                     Label("Copy Error", systemImage: "doc.on.doc")
                                         .font(.caption2.bold())
-                                        .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
+                                        .foregroundStyle(Color(uiColor: theme.accent))
                                 }
                             }
                         }

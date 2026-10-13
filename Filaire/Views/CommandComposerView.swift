@@ -6,6 +6,7 @@ import UIKit
 public struct CommandComposerView: View {
     public let context: TerminalSessionContext
     @Bindable public var interaction: TerminalInteractionState
+    @Environment(\.terminalTheme) private var theme
 
     public init(context: TerminalSessionContext, interaction: TerminalInteractionState) {
         self.context = context
@@ -51,22 +52,22 @@ public struct CommandComposerView: View {
             .clipShape(RoundedRectangle(cornerRadius: 8))
 
             if interaction.isDraftEphemeral {
-                label("This draft contains expanded secret values and is discarded when you close it.", color: SolarizedDarkTheme.yellow)
+                label("This draft contains expanded secret values and is discarded when you close it.", color: theme.warning)
             }
 
             if let error = interaction.inlineError {
-                label(error, color: SolarizedDarkTheme.red)
+                label(error, color: theme.error)
             }
 
             if let notice = interaction.evictionNotice {
-                label(notice, color: SolarizedDarkTheme.base00)
+                label(notice, color: theme.tertiaryText)
                     .onTapGesture { interaction.acknowledgeEvictionNotice() }
             }
 
             actions
         }
         .padding(12)
-        .background(Color(uiColor: SolarizedDarkTheme.base02))
+        .background(Color(uiColor: theme.secondarySurface))
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .alert("Snippet text", isPresented: Binding(
             get: { interaction.pendingPrefill != nil },
@@ -84,19 +85,19 @@ public struct CommandComposerView: View {
         HStack(spacing: 6) {
             Text(hostName)
                 .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base1))
+                .foregroundStyle(Color(uiColor: theme.primaryText))
                 .lineLimit(1)
 
             Text("• \(connectionSummary)")
                 .font(.system(size: 12, design: .monospaced))
-                .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base00))
+                .foregroundStyle(Color(uiColor: theme.tertiaryText))
                 .lineLimit(1)
 
             Spacer()
 
             Button("Close") { context.closeComposer() }
                 .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base0))
+                .foregroundStyle(Color(uiColor: theme.secondaryText))
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Composing for \(hostName), \(connectionSummary)")
@@ -106,29 +107,29 @@ public struct CommandComposerView: View {
         HStack(spacing: 8) {
             Button("Snippets") { context.openSnippetLibrary() }
                 .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base0))
+                .foregroundStyle(Color(uiColor: theme.secondaryText))
 
             Button("Save") { context.saveDraftAsSnippet() }
                 .disabled(interaction.draftText.isEmpty || interaction.isDraftEphemeral)
                 .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base0))
+                .foregroundStyle(Color(uiColor: theme.secondaryText))
 
             Button("Clear") { interaction.clearDraft() }
                 .disabled(interaction.draftText.isEmpty)
                 .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base0))
+                .foregroundStyle(Color(uiColor: theme.secondaryText))
 
             Spacer()
 
             Button("Insert") { submit(.insert) }
                 .disabled(!canSubmit)
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Color(uiColor: canSubmit ? SolarizedDarkTheme.base1 : SolarizedDarkTheme.base01))
+                .foregroundStyle(Color(uiColor: canSubmit ? theme.primaryText : theme.mutedText))
 
             Button("Run") { submit(.run) }
                 .disabled(!canSubmit)
                 .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(Color(uiColor: canSubmit ? SolarizedDarkTheme.green : SolarizedDarkTheme.base01))
+                .foregroundStyle(Color(uiColor: canSubmit ? theme.success : theme.mutedText))
         }
     }
 

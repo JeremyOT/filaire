@@ -5,6 +5,7 @@ import SwiftUI
 public struct SnippetLibraryView: View {
     public let context: TerminalSessionContext
     @Bindable public var interaction: TerminalInteractionState
+    @Environment(\.terminalTheme) private var theme
     @State private var query: String = ""
     @State private var storeMessage: String?
 
@@ -37,7 +38,7 @@ public struct SnippetLibraryView: View {
                     Section {
                         Text(notice)
                             .font(.footnote)
-                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.yellow))
+                            .foregroundStyle(Color(uiColor: theme.warning))
                         Button("Dismiss") { store.acknowledgeRecoveryNotice() }
                     }
                 }
@@ -46,7 +47,7 @@ public struct SnippetLibraryView: View {
                     Section {
                         Text(storeMessage)
                             .font(.footnote)
-                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.red))
+                            .foregroundStyle(Color(uiColor: theme.error))
                     }
                 }
 
@@ -54,7 +55,7 @@ public struct SnippetLibraryView: View {
                     Section {
                         Text(reason)
                             .font(.footnote)
-                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.red))
+                            .foregroundStyle(Color(uiColor: theme.error))
                     }
                 }
 
@@ -121,7 +122,7 @@ public struct SnippetLibraryView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(snippet.name)
                                 .font(.body)
-                                .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base1))
+                                .foregroundStyle(Color(uiColor: theme.primaryText))
                             if !snippet.description.isEmpty {
                                 Text(snippet.description)
                                     .font(.caption)

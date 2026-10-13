@@ -12,6 +12,7 @@ public struct HostListView: View {
     public let onConnectToHost: (HostProfile) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.terminalTheme) private var theme
 
     @State private var detectedWindowScene: UIWindowScene?
 
@@ -80,7 +81,7 @@ public struct HostListView: View {
                                 showingAddHost = true
                             }
                             .font(.subheadline.bold())
-                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
+                            .foregroundStyle(Color(uiColor: theme.accent))
                         }
                         .padding(.vertical, 4)
                     } else if filteredHosts.isEmpty {
@@ -181,21 +182,21 @@ public struct HostListView: View {
 
                             let buttonColor: Color = {
                                 if isOpenInOtherWindow {
-                                    return Color(uiColor: SolarizedDarkTheme.yellow)
+                                    return Color(uiColor: theme.warning)
                                 }
                                 if isCurrentWindow {
                                     switch currentConnState {
                                     case .connected:
-                                        return Color(uiColor: SolarizedDarkTheme.green)
+                                        return Color(uiColor: theme.success)
                                     case .connecting, .reconnecting:
-                                        return Color(uiColor: SolarizedDarkTheme.yellow)
+                                        return Color(uiColor: theme.warning)
                                     case .failed:
-                                        return Color(uiColor: SolarizedDarkTheme.red)
+                                        return Color(uiColor: theme.error)
                                     case .disconnected:
-                                        return Color(uiColor: SolarizedDarkTheme.cyan)
+                                        return Color(uiColor: theme.accent)
                                     }
                                 }
-                                return Color(uiColor: SolarizedDarkTheme.cyan)
+                                return Color(uiColor: theme.accent)
                             }()
 
                             let buttonAccessibilityLabel: String = {
@@ -227,15 +228,15 @@ public struct HostListView: View {
                                             HStack {
                                                 Text(host.displayName)
                                                     .font(.headline)
-                                                    .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base1))
+                                                    .foregroundStyle(Color(uiColor: theme.primaryText))
 
                                                 if isOpenInOtherWindow {
                                                     Text("Open in Window")
                                                         .font(.caption2.bold())
                                                         .padding(.horizontal, 6)
                                                         .padding(.vertical, 2)
-                                                        .background(Color(uiColor: SolarizedDarkTheme.yellow).opacity(0.2))
-                                                        .foregroundStyle(Color(uiColor: SolarizedDarkTheme.yellow))
+                                                        .background(Color(uiColor: theme.warning).opacity(0.2))
+                                                        .foregroundStyle(Color(uiColor: theme.warning))
                                                         .clipShape(Capsule())
                                                 } else if isCurrentWindow {
                                                     switch currentConnState {
@@ -244,32 +245,32 @@ public struct HostListView: View {
                                                             .font(.caption2.bold())
                                                             .padding(.horizontal, 6)
                                                             .padding(.vertical, 2)
-                                                            .background(Color(uiColor: SolarizedDarkTheme.green).opacity(0.2))
-                                                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.green))
+                                                            .background(Color(uiColor: theme.success).opacity(0.2))
+                                                            .foregroundStyle(Color(uiColor: theme.success))
                                                             .clipShape(Capsule())
                                                     case .connecting:
                                                         Text("Connecting")
                                                             .font(.caption2.bold())
                                                             .padding(.horizontal, 6)
                                                             .padding(.vertical, 2)
-                                                            .background(Color(uiColor: SolarizedDarkTheme.yellow).opacity(0.2))
-                                                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.yellow))
+                                                            .background(Color(uiColor: theme.warning).opacity(0.2))
+                                                            .foregroundStyle(Color(uiColor: theme.warning))
                                                             .clipShape(Capsule())
                                                     case .reconnecting:
                                                         Text("Reconnecting")
                                                             .font(.caption2.bold())
                                                             .padding(.horizontal, 6)
                                                             .padding(.vertical, 2)
-                                                            .background(Color(uiColor: SolarizedDarkTheme.yellow).opacity(0.2))
-                                                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.yellow))
+                                                            .background(Color(uiColor: theme.warning).opacity(0.2))
+                                                            .foregroundStyle(Color(uiColor: theme.warning))
                                                             .clipShape(Capsule())
                                                     case .disconnected, .failed:
                                                         Text("Disconnected")
                                                             .font(.caption2.bold())
                                                             .padding(.horizontal, 6)
                                                             .padding(.vertical, 2)
-                                                            .background(Color(uiColor: SolarizedDarkTheme.base01).opacity(0.2))
-                                                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base01))
+                                                            .background(Color(uiColor: theme.mutedText).opacity(0.2))
+                                                            .foregroundStyle(Color(uiColor: theme.mutedText))
                                                             .clipShape(Capsule())
                                                     }
                                                 }
@@ -277,7 +278,7 @@ public struct HostListView: View {
 
                                             Text(hostSubtitle)
                                                 .font(.system(size: 12, design: .monospaced))
-                                                .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base00))
+                                                .foregroundStyle(Color(uiColor: theme.tertiaryText))
                                         }
 
                                         Spacer()
@@ -306,7 +307,7 @@ public struct HostListView: View {
                                     } label: {
                                         Image(systemName: "macwindow.badge.plus")
                                             .font(.system(size: 15))
-                                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.yellow))
+                                            .foregroundStyle(Color(uiColor: theme.warning))
                                             .padding(6)
                                     }
                                     .buttonStyle(.borderless)
@@ -399,7 +400,7 @@ public struct HostListView: View {
                                     } label: {
                                         Label("New Window", systemImage: "macwindow.badge.plus")
                                     }
-                                    .tint(Color(uiColor: SolarizedDarkTheme.yellow))
+                                    .tint(Color(uiColor: theme.warning))
                                 }
                             }
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -413,7 +414,7 @@ public struct HostListView: View {
                                 } label: {
                                     Label("Duplicate", systemImage: "doc.on.doc")
                                 }
-                                .tint(Color(uiColor: SolarizedDarkTheme.cyan))
+                                .tint(Color(uiColor: theme.accent))
                             }
                         }
                         .onDelete(perform: deleteFilteredHosts)
@@ -421,7 +422,7 @@ public struct HostListView: View {
 
                     Button(action: { showingAddHost = true }) {
                         Label("Add Host", systemImage: "plus")
-                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
+                            .foregroundStyle(Color(uiColor: theme.accent))
                     }
                 }
 
@@ -454,7 +455,7 @@ public struct HostListView: View {
                                 fontSize = FontManager.shared.fontSize
                             }
                             .font(.caption.bold())
-                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
+                            .foregroundStyle(Color(uiColor: theme.accent))
                             .buttonStyle(.borderless)
                         }
                     }
@@ -500,12 +501,12 @@ public struct HostListView: View {
                 Section(header: Text("Security")) {
                     Button(action: { showingKeyManagement = true }) {
                         Label("Manage SSH Keys (\(availableKeys.count))", systemImage: "key.fill")
-                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.yellow))
+                            .foregroundStyle(Color(uiColor: theme.warning))
                     }
 
                     Button(action: { showingKnownHosts = true }) {
                         Label("Known Hosts & Fingerprints", systemImage: "lock.shield")
-                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
+                            .foregroundStyle(Color(uiColor: theme.accent))
                     }
                 }
 
@@ -517,13 +518,13 @@ public struct HostListView: View {
                         CompanionToolGuideView()
                     } label: {
                         Label("Installation & Commands Guide", systemImage: "terminal.fill")
-                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
+                            .foregroundStyle(Color(uiColor: theme.accent))
                     }
 
                     Link(destination: URL(string: "https://github.com/JeremyOT/filaire")!) {
                         HStack {
                             Label("Instructions on GitHub", systemImage: "safari")
-                                .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
+                                .foregroundStyle(Color(uiColor: theme.accent))
                             Spacer()
                             Image(systemName: "arrow.up.right")
                                 .font(.footnote)
@@ -563,7 +564,7 @@ public struct HostListView: View {
                     Link(destination: URL(string: "https://github.com/JeremyOT/filaire")!) {
                         HStack {
                             Label("Source / Licenses", systemImage: "safari")
-                                .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
+                                .foregroundStyle(Color(uiColor: theme.accent))
                             Spacer()
                             Image(systemName: "arrow.up.right")
                                 .font(.footnote)
@@ -829,6 +830,7 @@ public struct HostListView: View {
 }
 
 public struct CompanionToolGuideView: View {
+    @Environment(\.terminalTheme) private var theme
     @State private var copiedCommand: String? = nil
 
     public static let cargoCommand = "cargo install --git https://github.com/JeremyOT/filaire fil"
@@ -853,8 +855,8 @@ public struct CompanionToolGuideView: View {
                         .font(.system(size: 12, design: .monospaced))
                         .padding(10)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color(uiColor: SolarizedDarkTheme.base02))
-                        .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base1))
+                        .background(Color(uiColor: theme.secondarySurface))
+                        .foregroundStyle(Color(uiColor: theme.primaryText))
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                         .textSelection(.enabled)
 
@@ -870,7 +872,7 @@ public struct CompanionToolGuideView: View {
                         Label(copiedCommand == "cargo" ? "Copied to Clipboard!" : "Copy Cargo Install Command",
                               systemImage: copiedCommand == "cargo" ? "checkmark" : "doc.on.doc")
                             .font(.caption.bold())
-                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
+                            .foregroundStyle(Color(uiColor: theme.accent))
                     }
                     .buttonStyle(.borderless)
                 }
@@ -883,8 +885,8 @@ public struct CompanionToolGuideView: View {
                         .font(.system(size: 11, design: .monospaced))
                         .padding(10)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color(uiColor: SolarizedDarkTheme.base02))
-                        .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base1))
+                        .background(Color(uiColor: theme.secondarySurface))
+                        .foregroundStyle(Color(uiColor: theme.primaryText))
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                         .textSelection(.enabled)
 
@@ -900,7 +902,7 @@ public struct CompanionToolGuideView: View {
                         Label(copiedCommand == "source" ? "Copied to Clipboard!" : "Copy Build Commands",
                               systemImage: copiedCommand == "source" ? "checkmark" : "doc.on.doc")
                             .font(.caption.bold())
-                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
+                            .foregroundStyle(Color(uiColor: theme.accent))
                     }
                     .buttonStyle(.borderless)
                 }
@@ -911,7 +913,7 @@ public struct CompanionToolGuideView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("eval $(fil agent)")
                         .font(.system(.subheadline, design: .monospaced).bold())
-                        .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
+                        .foregroundStyle(Color(uiColor: theme.accent))
                     Text("Bridge forwarded iOS biometric SSH Agent (Face ID / Touch ID on sign).")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -921,7 +923,7 @@ public struct CompanionToolGuideView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("fil copy <file or text>")
                         .font(.system(.subheadline, design: .monospaced).bold())
-                        .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
+                        .foregroundStyle(Color(uiColor: theme.accent))
                     Text("Copy text or file contents directly to your iOS clipboard.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -931,7 +933,7 @@ public struct CompanionToolGuideView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("fil open <url>")
                         .font(.system(.subheadline, design: .monospaced).bold())
-                        .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
+                        .foregroundStyle(Color(uiColor: theme.accent))
                     Text("Open URLs immediately in Safari on your iPad/iPhone.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -941,7 +943,7 @@ public struct CompanionToolGuideView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("fil preview <file>")
                         .font(.system(.subheadline, design: .monospaced).bold())
-                        .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
+                        .foregroundStyle(Color(uiColor: theme.accent))
                     Text("Preview documents, images, PDFs, media, and archives with Apple Quick Look.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -951,7 +953,7 @@ public struct CompanionToolGuideView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("fil notify <title> [body]")
                         .font(.system(.subheadline, design: .monospaced).bold())
-                        .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
+                        .foregroundStyle(Color(uiColor: theme.accent))
                     Text("Send in-app HUD toast banners and iOS push notifications.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -963,7 +965,7 @@ public struct CompanionToolGuideView: View {
                 Link(destination: URL(string: "https://github.com/JeremyOT/filaire")!) {
                     HStack {
                         Label("Filaire Repository & Documentation", systemImage: "safari")
-                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
+                            .foregroundStyle(Color(uiColor: theme.accent))
                         Spacer()
                         Image(systemName: "arrow.up.right")
                             .font(.footnote)

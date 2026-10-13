@@ -246,10 +246,13 @@ public enum WindowBootstrapState: Equatable, Sendable {
 @main
 struct FilaireApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @State private var themeManager = ThemeManager.shared
 
     var body: some Scene {
         WindowGroup {
             WindowRootView()
+                .environment(\.terminalTheme, themeManager.currentTheme)
+                .environment(themeManager)
         }
         .handlesExternalEvents(matching: Set([QuickActionManager.connectHostActionType, "*"]))
     }
@@ -495,6 +498,7 @@ private struct PreviewOverlayModifier: ViewModifier {
 struct MainContentView: View {
     @Bindable var appState: AppState
     var window: UIWindow? = nil
+    @Environment(\.terminalTheme) private var theme
     @State private var showingHostManagement = false
     #if DEBUG
     @State private var showingHostEditor = false
@@ -539,7 +543,7 @@ struct MainContentView: View {
 
             ZStack(alignment: .top) {
                 // Background matching active terminal theme
-                Color(uiColor: ThemeManager.shared.currentTheme.background)
+                Color(uiColor: theme.surfaceBackground)
                     .ignoresSafeArea()
 
                 if appState.hosts.isEmpty {
@@ -602,17 +606,17 @@ struct MainContentView: View {
                 if let toast = appState.sessionManager.activeToast {
                     HStack(spacing: 10) {
                         Image(systemName: toast.title.contains("Window") ? "macwindow.badge.plus" : "bell.badge.fill")
-                            .foregroundStyle(Color(uiColor: SolarizedDarkTheme.yellow))
+                            .foregroundStyle(Color(uiColor: theme.warning))
                             .font(.system(size: 15))
 
                         VStack(alignment: .leading, spacing: 2) {
                             Text(toast.title)
                                 .font(.system(size: 13, weight: .bold))
-                                .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base1))
+                                .foregroundStyle(Color(uiColor: theme.primaryText))
                             if !toast.message.isEmpty {
                                 Text(toast.message)
                                     .font(.system(size: 12))
-                                    .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base0))
+                                    .foregroundStyle(Color(uiColor: theme.secondaryText))
                             }
                         }
 
@@ -622,10 +626,10 @@ struct MainContentView: View {
                     .padding(.vertical, 10)
                     .background(
                         Capsule()
-                            .fill(Color(uiColor: SolarizedDarkTheme.base02).opacity(0.95))
+                            .fill(Color(uiColor: theme.secondarySurface).opacity(0.95))
                             .overlay(
                                 Capsule()
-                                    .stroke(Color(uiColor: SolarizedDarkTheme.base01).opacity(0.4), lineWidth: 0.5)
+                                    .stroke(Color(uiColor: theme.separator).opacity(0.4), lineWidth: 0.5)
                             )
                             .shadow(color: Color.black.opacity(0.35), radius: 8, x: 0, y: 3)
                     )
@@ -768,25 +772,25 @@ struct MainContentView: View {
 
             Image(systemName: "terminal.fill")
                 .font(.system(size: 64))
-                .foregroundStyle(Color(uiColor: SolarizedDarkTheme.cyan))
+                .foregroundStyle(Color(uiColor: theme.accent))
 
             Text("Welcome to Filaire")
                 .font(.title2.bold())
-                .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base1))
+                .foregroundStyle(Color(uiColor: theme.primaryText))
 
             Text("A native SSH terminal client built for tmux workflows.")
                 .font(.subheadline)
-                .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base0))
+                .foregroundStyle(Color(uiColor: theme.secondaryText))
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
 
             Button(action: { showingHostManagement = true }) {
                 Label("Configure Remote Host", systemImage: "plus.circle.fill")
                     .font(.headline)
-                    .foregroundStyle(Color(uiColor: SolarizedDarkTheme.base03))
+                    .foregroundStyle(Color(uiColor: theme.surfaceBackground))
                     .padding(.horizontal, 24)
                     .padding(.vertical, 12)
-                    .background(Color(uiColor: SolarizedDarkTheme.cyan))
+                    .background(Color(uiColor: theme.accent))
                     .clipShape(RoundedRectangle(cornerRadius: 10))
             }
             .padding(.top, 12)
