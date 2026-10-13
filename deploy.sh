@@ -66,7 +66,9 @@ if [ -f "scripts/provision.py" ]; then
     $PYTHON_BIN scripts/provision.py || true
 fi
 
-IOS_PROFILE_NAME="${IOS_PROFILE_NAME:-Filaire AppStore ${BUNDLE_ID}}"
+# If IOS_PROFILE_NAME is provided in .deploy.env, manual signing with that profile is used.
+# If omitted or empty, automatic signing via App Store Connect is used.
+IOS_PROFILE_NAME="${IOS_PROFILE_NAME:-}"
 
 # 8. Build and deploy companion CLI tool fil to ~/bin/fil
 if [ -d "tools/fil" ]; then
